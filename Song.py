@@ -565,6 +565,9 @@ if __name__ == '__main__':
         np.sqrt(np.sum((traj - base_fertility)**2)) for traj in results['fertility_trajectories']
     ]
 
+    import os
+    os.makedirs('./figures', exist_ok=True)
+    os.makedirs('./results', exist_ok=True)
     # UNCERTAINTY VISUALIZATIONS
     print("\nGenerating uncertainty visualizations...")
     
@@ -575,7 +578,7 @@ if __name__ == '__main__':
     sns.histplot(results_df['aging_index'], kde=True, bins=10, ax=axes[1,0])
     sns.histplot(results_df['years_above_1.2B'], kde=True, bins=10, ax=axes[1,1])
     plt.tight_layout()
-    plt.savefig('./Figures/uncertainty_distributions.png')
+    plt.savefig('./figures/uncertainty_distributions.png')
     plt.close()
 
     # 2. Trajectory plots
@@ -587,7 +590,7 @@ if __name__ == '__main__':
     plt.axhline(1.2e9, color='black', linestyle='--', label='1.2B Threshold')
     plt.title('Population Trajectories')
     plt.legend()
-    plt.savefig('./Figures/population_trajectories.png')
+    plt.savefig('./figures/population_trajectories.png')
     plt.close()
 
     # 3. Fertility trajectories
@@ -599,7 +602,7 @@ if __name__ == '__main__':
     plt.axhline(2.16, color='green', linestyle='--', label='Replacement Level')
     plt.title('Fertility Trajectories')
     plt.legend()
-    plt.savefig('./Figures/fertility_trajectories.png')
+    plt.savefig('./figures/fertility_trajectories.png')
     plt.close()
 
     # SUMMARY STATISTICS
@@ -609,5 +612,5 @@ if __name__ == '__main__':
     print(f"Mean Fertility Distance: {np.mean(results_df['fertility_distance']):.2f}")
 
     # Save results
-    results_df.to_csv('simulation_results.csv', index=False)
+    results_df.to_csv('./results/simulation_results.csv', index=False)
     print(f"\nTotal runtime: {time.time()-start_time:.2f} seconds")

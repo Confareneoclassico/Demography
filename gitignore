@@ -1,0 +1,29 @@
+# macOS artifacts
+__MACOSX/
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+env/
+
+# Generated outputs (reproducible from scripts — don't commit)
+figures/*.png
+figures/*.pdf
+results/*.csv
+results/*.txt
+
+# Keep placeholder files
+!figures/.gitkeep
+!results/.gitkeep
+
+# Large data files (download instructions in README)
+data/WPP2024_GEN_F01_DEMOGRAPHIC_INDICATORS_COMPACT.xlsx
+
+# Editor
+.vscode/
+.idea/
+*.swp

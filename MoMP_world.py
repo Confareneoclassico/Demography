@@ -448,6 +448,9 @@ def run_simulation_with_actual_data(params, data):
 
 if __name__ == '__main__':
     # Load data once at the beginning
+    import os
+    os.makedirs('./figures', exist_ok=True)
+    os.makedirs('./results', exist_ok=True)
     print("Loading demographic data...")
     demographic_data = load_actual_demographic_data()
     print("Data loaded successfully")
@@ -481,7 +484,7 @@ if __name__ == '__main__':
         'population_2075_millions': Y_2075
     })
     
-    results_df.to_csv('./Data/simulation_results_actual.csv', index=False)
+    results_df.to_csv('./results/simulation_results_actual.csv', index=False)
     print("Simulation results saved")
     
     # Compare with UN projections
@@ -511,7 +514,7 @@ if __name__ == '__main__':
         print(f"{name}: First-order = {Si_2075['S1'][i]:.3f}, Total-order = {Si_2075['ST'][i]:.3f}")
         
     # Save Sobol' results to a file
-    with open("sobol_results.txt", "w") as f:
+    with open("./results/sobol_results.txt", "w") as f:
         f.write("Sobol' Analysis Results\n\n")
         f.write("--- 2050 Projections ---\n")
         f.write("First-order indices:\n")
@@ -556,7 +559,7 @@ if __name__ == '__main__':
             plt.xlabel(param_name)
             plt.ylabel('Population 2050')
             plt.tight_layout()
-            plt.savefig(f'scatter_2050_{param_name}.png')
+            plt.savefig(f'./figures/scatter_2050_{param_name}.png')
             plt.close()
             
             data_2075 = simdec_data_2075.iloc[::16]
@@ -568,7 +571,7 @@ if __name__ == '__main__':
             plt.xlabel(param_name)
             plt.ylabel('Population 2075')
             plt.tight_layout()
-            plt.savefig(f'scatter_2075_{param_name}.png')
+            plt.savefig(f'./figures/scatter_2075_{param_name}.png')
             plt.close()
         else:
             plt.figure(figsize=(8, 6))
@@ -577,7 +580,7 @@ if __name__ == '__main__':
             plt.xlabel(param_name)
             plt.ylabel('Population 2050')
             plt.tight_layout()
-            plt.savefig(f'scatter_2050_{param_name}.png')
+            plt.savefig(f'./figures/scatter_2050_{param_name}.png')
             plt.close()
 
             plt.figure(figsize=(8, 6))
@@ -586,6 +589,6 @@ if __name__ == '__main__':
             plt.xlabel(param_name)
             plt.ylabel('Population 2075')
             plt.tight_layout()
-            plt.savefig(f'scatter_2075_{param_name}.png')
+            plt.savefig(f'./figures/scatter_2075_{param_name}.png')
             plt.close()
     print("Scatter plots for input parameters vs. output saved.")
