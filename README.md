@@ -1,8 +1,8 @@
-# What demographic prediction can and cannot achieve
+# What Demographic Prediction Can and Cannot Achieve: A Global Sensitivity Analysis of Structural Risk in Population Projections
 
 Data and scripts for the study:
 
-> Lo Piano, S. et al. "What demographic prediction can and cannot achieve." *AStA Advances in Statistical Analysis* (under review).
+> Lo Piano, S. et al. "What Demographic Prediction Can and Cannot Achieve: A Global Sensitivity Analysis of Structural Risk in Population Projections." *Risk Analysis* (under review).
 
 This repository applies Global Sensitivity Analysis (GSA) and the Modelling of the Modelling Process (MoMP) framework to two demographic case studies: (1) a retrospective analysis of the optimisation-based model used to underpin China's one-child policy (Song et al.), and (2) a multi-model projection of global population to 2050 and 2075.
 
@@ -112,8 +112,8 @@ pdflatex main.tex
 If you use this code or data, please cite:
 
 ```
-Lo Piano, S. et al. "What demographic prediction can and cannot achieve."
-AStA Advances in Statistical Analysis (under review, 2025).
+Lo Piano, S. et al. "What Demographic Prediction Can and Cannot Achieve: A Global Sensitivity Analysis of Structural Risk in Population Projections."
+Risk Analysis (under review, 2026).
 Repository: https://github.com/Confareneoclassico/Demography
 ```
 
