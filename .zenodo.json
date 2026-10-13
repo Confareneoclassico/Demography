@@ -1,0 +1,38 @@
+{
+  "title": "Code and data for \"What Demographic Prediction Can and Cannot Achieve: A Global Sensitivity Analysis of Structural Risk in Population Projections\"",
+  "upload_type": "software",
+  "description": "<p>Data and scripts for the study \"What Demographic Prediction Can and Cannot Achieve: A Global Sensitivity Analysis of Structural Risk in Population Projections\" (Risk Analysis, revised version under review). The repository applies global sensitivity analysis and the modelling of the modelling process to two case studies: a retrospective sensitivity audit of the optimal-control model of Song et al. that underpinned China's one-child policy, and a multi-model projection of world population to 2050 and 2075 comparing cohort-component sub-models with an aggregate ARIMA paradigm. Both case studies use a Saltelli design with first-order and total-order Sobol' indices and given-data optimal-transport indices, with bootstrap confidence intervals and convergence diagnostics. The results folder holds the outputs from which the paper's tables and figures are drawn.</p>",
+  "creators": [
+    {
+      "name": "Lo Piano, Samuele",
+      "affiliation": "Faculty of Management and Economics, Gdansk University of Technology, Gdansk, Poland; Barcelona School of Management, Universitat Pompeu Fabra, Barcelona, Spain",
+      "orcid": "0000-0002-2625-483X"
+    },
+    {
+      "name": "Kuc-Czarnecka, Marta",
+      "affiliation": "Faculty of Management and Economics, Gdansk University of Technology, Gdansk, Poland"
+    },
+    {
+      "name": "Pielke Jr., Roger",
+      "affiliation": "American Enterprise Institute, Washington, DC, USA; Center for Science and Technology Policy, University of Colorado Boulder, USA"
+    },
+    {
+      "name": "Saltelli, Andrea",
+      "affiliation": "Barcelona School of Management, Universitat Pompeu Fabra, Barcelona, Spain; Centre for the Study of the Sciences and the Humanities, University of Bergen, Norway"
+    }
+  ],
+  "license": "gpl-3.0-only",
+  "access_right": "open",
+  "keywords": [
+    "global sensitivity analysis",
+    "uncertainty quantification",
+    "modelling of the modelling process",
+    "population projections",
+    "demography",
+    "Sobol' indices",
+    "optimal transport",
+    "one-child policy",
+    "structural uncertainty"
+  ],
+  "language": "eng"
+}

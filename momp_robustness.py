@@ -114,7 +114,9 @@ for tag in ('2050', '2075'):
     out['ot'][tag] = {n: dict(OT=float(pt[j]), SE=float(se[j]), lo=float(pt[j] - 1.959964*se[j]),
                               hi=float(pt[j] + 1.959964*se[j]), pct_lo=float(plo[j]), pct_hi=float(phi[j]))
                       for j, n in enumerate(NAMES)}
-    print(f"  [{tag}] OT (B_OT={B_OT}): " + ", ".join(f"{n}={pt[j]:.2f}[{lo[j]:.2f},{hi[j]:.2f}]" for j, n in enumerate(NAMES) if pt[j] > 0.05))
+    print(f"  [{tag}] OT (B_OT={B_OT}): " + ", ".join(
+        f"{n}={pt[j]:.2f}[{pt[j]-1.959964*se[j]:.2f},{pt[j]+1.959964*se[j]:.2f}]"
+        for j, n in enumerate(NAMES) if pt[j] > 0.05))
 json.dump(out, open('./results/momp_robustness.json', 'w'), indent=1)
 
 # ---------------------------------------------------------------- figure ----

@@ -17,4 +17,8 @@ env/
 
 # Generated outputs (reproducible from the scripts)
 figures/
-results/
+results/*
+!results/*.csv
+!results/*.json
+!results/*.txt
+!results/*.npz
