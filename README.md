@@ -1,5 +1,7 @@
 # What Demographic Prediction Can and Cannot Achieve: A Global Sensitivity Analysis of Structural Risk in Population Projections
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23344949.svg)](https://doi.org/10.5281/zenodo.23344949)
+
 Data and scripts for the study
 
 > Lo Piano, S., Kuc-Czarnecka, M., Pielke Jr., R. and Saltelli, A. "What Demographic Prediction Can and Cannot Achieve: A Global Sensitivity Analysis of Structural Risk in Population Projections." *Risk Analysis* (revised version under review, 2026).
@@ -69,7 +71,8 @@ The submitted version contained an error in the Lotka branch, which passed the b
 ```
 Lo Piano, S., Kuc-Czarnecka, M., Pielke Jr., R. and Saltelli, A. "What Demographic Prediction Can and
 Cannot Achieve: A Global Sensitivity Analysis of Structural Risk in Population Projections."
-Risk Analysis (revised version under review, 2026). https://github.com/Confareneoclassico/Demography
+Risk Analysis (revised version under review, 2026).
+Code and data: Zenodo, https://doi.org/10.5281/zenodo.23344949
 ```
 
 ## License
