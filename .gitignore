@@ -1,7 +1,8 @@
-# macOS
+# macOS and cloud-drive folder metadata
 .DS_Store
 ._*
 __MACOSX/
+Icon?
 
 # Python
 __pycache__/
