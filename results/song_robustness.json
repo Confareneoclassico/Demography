@@ -3053,212 +3053,212 @@
   "_note": "excluded from the analysis (KDE fails on censored tfr_min); S1_binned_salib uses equal-count rank bins (biased low for discrete inputs)",
   "tfr_min": {
    "initial_pyramid_type": {
-    "delta": 22.68776948385797,
-    "delta_conf": 8.872965982546237,
-    "S1_binned_salib": 0.9863388906680475
+    "delta": 18.20690020638749,
+    "delta_conf": 8.389768684731957,
+    "S1_binned_salib": 0.9602202147239961
    },
    "fertility_rate_source": {
-    "delta": 0.18823366771705466,
-    "delta_conf": 0.0018427706571810677,
-    "S1_binned_salib": 0.004763665246599145
+    "delta": 0.18727012921340772,
+    "delta_conf": 0.0019419327055913119,
+    "S1_binned_salib": 0.003700206186610431
    },
    "mortality_evolution_factor": {
-    "delta": 0.1890739953994978,
-    "delta_conf": 0.0018351522440587069,
-    "S1_binned_salib": 0.0030246214454518194
+    "delta": 0.18808546273969334,
+    "delta_conf": 0.0018766625660066529,
+    "S1_binned_salib": 0.006733224800064023
    },
    "newborn_female_proportion": {
-    "delta": 0.1879265785969935,
-    "delta_conf": 0.0017072708201229668,
-    "S1_binned_salib": 0.0076357453368671715
+    "delta": 0.18713312064206164,
+    "delta_conf": 0.001818475277600992,
+    "S1_binned_salib": 0.003736729574983568
    },
    "optimizer_tolerance": {
-    "delta": 0.18845927098713514,
-    "delta_conf": 0.0016809233673194068,
-    "S1_binned_salib": 0.010863759580576693
+    "delta": 0.18917984692821568,
+    "delta_conf": 0.0018089479955772673,
+    "S1_binned_salib": 0.011779566450365318
    },
    "optimizer_max_iterations": {
-    "delta": 0.18687373480226982,
-    "delta_conf": 0.001888018837892903,
-    "S1_binned_salib": 0.007956207119999819
+    "delta": 0.18754281760245411,
+    "delta_conf": 0.0015975303614614166,
+    "S1_binned_salib": 0.008838478474633031
    },
    "penalty_factor": {
-    "delta": 0.18752962908795037,
-    "delta_conf": 0.001685094601083447,
-    "S1_binned_salib": 0.00729351621520819
+    "delta": 0.18616084518836246,
+    "delta_conf": 0.0016386630279424871,
+    "S1_binned_salib": 0.004249311303412143
    },
    "fertility_age_shift_factor": {
-    "delta": 0.19009170402493247,
-    "delta_conf": 0.0017295684543283969,
-    "S1_binned_salib": 0.005148703113232258
+    "delta": 0.18733536785747618,
+    "delta_conf": 0.0016898292940222773,
+    "S1_binned_salib": 0.003936453862621175
    }
   },
   "year_tfr_min": {
    "initial_pyramid_type": {
-    "delta": 0.47882624061276274,
-    "delta_conf": 0.009639028023749243,
-    "S1_binned_salib": 0.7965301871276917
+    "delta": 0.4863573660920064,
+    "delta_conf": 0.009168667325951431,
+    "S1_binned_salib": 0.77220814699326
    },
    "fertility_rate_source": {
-    "delta": 0.31467593890481926,
-    "delta_conf": 0.005063768926966433,
-    "S1_binned_salib": 0.18757398511360274
+    "delta": 0.3161821244530135,
+    "delta_conf": 0.0057448123165317055,
+    "S1_binned_salib": 0.18335841099499328
    },
    "mortality_evolution_factor": {
-    "delta": 0.13309061108283596,
-    "delta_conf": 0.003673649461296062,
-    "S1_binned_salib": 0.003034680313957983
+    "delta": 0.14027942861275033,
+    "delta_conf": 0.003949090160316349,
+    "S1_binned_salib": 0.005172409146728017
    },
    "newborn_female_proportion": {
-    "delta": 0.13018100883048386,
-    "delta_conf": 0.00390911030045074,
-    "S1_binned_salib": 0.006819322582062774
+    "delta": 0.12936106354370522,
+    "delta_conf": 0.004245577663849375,
+    "S1_binned_salib": 0.009716446033631533
    },
    "optimizer_tolerance": {
-    "delta": 0.13323284259775214,
-    "delta_conf": 0.004173764986004607,
-    "S1_binned_salib": 0.0072425299100966145
+    "delta": 0.13877457920490205,
+    "delta_conf": 0.004560422057810204,
+    "S1_binned_salib": 0.005441442364894641
    },
    "optimizer_max_iterations": {
-    "delta": 0.12271634420454848,
-    "delta_conf": 0.004093365791801575,
-    "S1_binned_salib": 0.0033851894684221663
+    "delta": 0.1319849157888886,
+    "delta_conf": 0.004244263741280199,
+    "S1_binned_salib": 0.004716183335293732
    },
    "penalty_factor": {
-    "delta": 0.12997848122008268,
-    "delta_conf": 0.0037280605108826357,
-    "S1_binned_salib": 0.009199796602280328
+    "delta": 0.13180874697058204,
+    "delta_conf": 0.004084519560777603,
+    "S1_binned_salib": 0.0032847745607215823
    },
    "fertility_age_shift_factor": {
-    "delta": 0.1390748371900713,
-    "delta_conf": 0.003797161592951105,
-    "S1_binned_salib": 0.005885793307889591
+    "delta": 0.14069599335791605,
+    "delta_conf": 0.003921230113846313,
+    "S1_binned_salib": 0.005737811377627015
    }
   },
   "years_below_2": {
    "initial_pyramid_type": {
-    "delta": 0.35966466549660053,
-    "delta_conf": 0.010543801800950332,
-    "S1_binned_salib": 0.5666569241108697
+    "delta": 0.3569721470847007,
+    "delta_conf": 0.009975184329119303,
+    "S1_binned_salib": 0.535075584354294
    },
    "fertility_rate_source": {
-    "delta": 0.22458197402585278,
-    "delta_conf": 0.006433774688684658,
-    "S1_binned_salib": 0.2083031143491756
+    "delta": 0.22596058231714555,
+    "delta_conf": 0.007284690373796353,
+    "S1_binned_salib": 0.2122127113490373
    },
    "mortality_evolution_factor": {
-    "delta": 0.15124708545096766,
-    "delta_conf": 0.005565208659311352,
-    "S1_binned_salib": 0.010770955170900745
+    "delta": 0.14604994095651447,
+    "delta_conf": 0.006051551735427551,
+    "S1_binned_salib": 0.009111055044717297
    },
    "newborn_female_proportion": {
-    "delta": 0.13632612236443326,
-    "delta_conf": 0.005969602017669766,
-    "S1_binned_salib": 0.006371948103600739
+    "delta": 0.1378185392618589,
+    "delta_conf": 0.006265458712378632,
+    "S1_binned_salib": 0.004797672223408436
    },
    "optimizer_tolerance": {
-    "delta": 0.15565515033943345,
-    "delta_conf": 0.005599985617380127,
-    "S1_binned_salib": 0.011732452270063575
+    "delta": 0.1451746019472398,
+    "delta_conf": 0.005430822977162926,
+    "S1_binned_salib": 0.015036388491376155
    },
    "optimizer_max_iterations": {
-    "delta": 0.1580514657417379,
-    "delta_conf": 0.005635392132852048,
-    "S1_binned_salib": 0.037426185591350344
+    "delta": 0.14467678714526347,
+    "delta_conf": 0.005407717123965735,
+    "S1_binned_salib": 0.0537250587917474
    },
    "penalty_factor": {
-    "delta": 0.14875694011615095,
-    "delta_conf": 0.006615579424531148,
-    "S1_binned_salib": 0.009056397901095399
+    "delta": 0.1518549837179133,
+    "delta_conf": 0.0060964197982324615,
+    "S1_binned_salib": 0.004335095894057447
    },
    "fertility_age_shift_factor": {
-    "delta": 0.1604593961871803,
-    "delta_conf": 0.0061768249600894064,
-    "S1_binned_salib": 0.035743265076228006
+    "delta": 0.1562983071913924,
+    "delta_conf": 0.006013947927702171,
+    "S1_binned_salib": 0.03889086395690796
    }
   },
   "cum_deficit": {
    "initial_pyramid_type": {
-    "delta": 0.6301451922210402,
-    "delta_conf": 0.01412144985976913,
-    "S1_binned_salib": 0.894058798152682
+    "delta": 0.6457607014383016,
+    "delta_conf": 0.014111413924589979,
+    "S1_binned_salib": 0.8645564233698241
    },
    "fertility_rate_source": {
-    "delta": 0.17020341237595038,
-    "delta_conf": 0.004398244592203421,
-    "S1_binned_salib": 0.08204620210054904
+    "delta": 0.1683003676684065,
+    "delta_conf": 0.005025589396023376,
+    "S1_binned_salib": 0.08046895097900872
    },
    "mortality_evolution_factor": {
-    "delta": 0.09248572644022934,
-    "delta_conf": 0.004184024899762018,
-    "S1_binned_salib": 0.004876801828941442
+    "delta": 0.09396989665754774,
+    "delta_conf": 0.004450397098026629,
+    "S1_binned_salib": 0.0069841812811920565
    },
    "newborn_female_proportion": {
-    "delta": 0.08790854741682803,
-    "delta_conf": 0.005190094178989347,
-    "S1_binned_salib": 0.007612416916965863
+    "delta": 0.09366319312784183,
+    "delta_conf": 0.005044368913922757,
+    "S1_binned_salib": 0.004724601169796643
    },
    "optimizer_tolerance": {
-    "delta": 0.09668252026711055,
-    "delta_conf": 0.005202130079643722,
-    "S1_binned_salib": 0.010517076313953528
+    "delta": 0.0952220178684037,
+    "delta_conf": 0.005066133103650946,
+    "S1_binned_salib": 0.01009288049443594
    },
    "optimizer_max_iterations": {
-    "delta": 0.08302129839363609,
-    "delta_conf": 0.004271105407581906,
-    "S1_binned_salib": 0.00826672470233075
+    "delta": 0.09580497413564806,
+    "delta_conf": 0.004612642860556897,
+    "S1_binned_salib": 0.012867188157375992
    },
    "penalty_factor": {
-    "delta": 0.08347106725014192,
-    "delta_conf": 0.0042981413797204045,
-    "S1_binned_salib": 0.007558422577706025
+    "delta": 0.08566304270064347,
+    "delta_conf": 0.004542609620413707,
+    "S1_binned_salib": 0.0042257863981709776
    },
    "fertility_age_shift_factor": {
-    "delta": 0.10029078401519964,
-    "delta_conf": 0.004386927108418967,
-    "S1_binned_salib": 0.008305700965378165
+    "delta": 0.09432767896692563,
+    "delta_conf": 0.004543321834211861,
+    "S1_binned_salib": 0.007857867181918717
    }
   },
   "year_return_repl": {
    "initial_pyramid_type": {
-    "delta": 0.4437976079249528,
-    "delta_conf": 0.01153092545665147,
-    "S1_binned_salib": 0.6261269511975003
+    "delta": 0.4430472448710191,
+    "delta_conf": 0.01198678741255255,
+    "S1_binned_salib": 0.5995005461765153
    },
    "fertility_rate_source": {
-    "delta": 0.4120214370937207,
-    "delta_conf": 0.012254579637831567,
-    "S1_binned_salib": 0.022900060783944864
+    "delta": 0.3953483915462131,
+    "delta_conf": 0.013516377123106521,
+    "S1_binned_salib": 0.022300981629662927
    },
    "mortality_evolution_factor": {
-    "delta": 0.13597036273659482,
-    "delta_conf": 0.004559684218247424,
-    "S1_binned_salib": 0.008977676142508318
+    "delta": 0.12873853642842417,
+    "delta_conf": 0.004606970116525519,
+    "S1_binned_salib": 0.008878751781979029
    },
    "newborn_female_proportion": {
-    "delta": 0.1343415026307449,
-    "delta_conf": 0.004391164284832289,
-    "S1_binned_salib": 0.005336637369566923
+    "delta": 0.13232969355972135,
+    "delta_conf": 0.004702025457286357,
+    "S1_binned_salib": 0.005248426372600304
    },
    "optimizer_tolerance": {
-    "delta": 0.13904927134514675,
-    "delta_conf": 0.004836766488620665,
-    "S1_binned_salib": 0.020142626382122067
+    "delta": 0.13477877278251627,
+    "delta_conf": 0.004842541177577807,
+    "S1_binned_salib": 0.020179305519397693
    },
    "optimizer_max_iterations": {
-    "delta": 0.1388662382124116,
-    "delta_conf": 0.0047771749030150286,
-    "S1_binned_salib": 0.0061691539326215235
+    "delta": 0.14077459717949303,
+    "delta_conf": 0.0047425931856183885,
+    "S1_binned_salib": 0.007444694131397095
    },
    "penalty_factor": {
-    "delta": 0.1374601803899462,
-    "delta_conf": 0.004403669051161515,
-    "S1_binned_salib": 0.005452593242113616
+    "delta": 0.1326635139664014,
+    "delta_conf": 0.004430104544630663,
+    "S1_binned_salib": 0.003410935949733468
    },
    "fertility_age_shift_factor": {
-    "delta": 0.1493404951302686,
-    "delta_conf": 0.005499912660192761,
-    "S1_binned_salib": 0.01774778060334805
+    "delta": 0.15403382292720993,
+    "delta_conf": 0.005109305179650286,
+    "S1_binned_salib": 0.02504450414193978
    }
   }
  }
