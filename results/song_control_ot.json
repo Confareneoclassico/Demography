@@ -1,0 +1,42 @@
+{
+ "tfr_min": {
+  "initial_pyramid_type": 0.9635705508585335,
+  "fertility_rate_source": 0.007244760030669885,
+  "mortality_evolution_factor": 0.0661097993665199,
+  "newborn_female_proportion": 0.08948765152697814,
+  "optimizer_tolerance": 0.05127506292382769,
+  "optimizer_max_iterations": 0.09567434752207597,
+  "penalty_factor": 0.055402797283345934,
+  "fertility_age_shift_factor": 0.04830499098569828
+ },
+ "year_tfr_min": {
+  "initial_pyramid_type": 0.6220654984865321,
+  "fertility_rate_source": 0.17928530601741277,
+  "mortality_evolution_factor": 0.07677629165993528,
+  "newborn_female_proportion": 0.08255121462207513,
+  "optimizer_tolerance": 0.06611673548588157,
+  "optimizer_max_iterations": 0.1272553290660053,
+  "penalty_factor": 0.09359915806869931,
+  "fertility_age_shift_factor": 0.07810802942993621
+ },
+ "cum_deficit": {
+  "initial_pyramid_type": 0.708447293845251,
+  "fertility_rate_source": 0.06421100646211034,
+  "mortality_evolution_factor": 0.04874574352334532,
+  "newborn_female_proportion": 0.05971984861862267,
+  "optimizer_tolerance": 0.03681440168615814,
+  "optimizer_max_iterations": 0.08221853474033286,
+  "penalty_factor": 0.047248293437418286,
+  "fertility_age_shift_factor": 0.04360790372676451
+ },
+ "year_return_repl": {
+  "initial_pyramid_type": 0.5179320389281327,
+  "fertility_rate_source": 0.33645417434479935,
+  "mortality_evolution_factor": 0.10511443616912368,
+  "newborn_female_proportion": 0.12897663288288289,
+  "optimizer_tolerance": 0.09448502124283374,
+  "optimizer_max_iterations": 0.12470967060810811,
+  "penalty_factor": 0.14892978027743653,
+  "fertility_age_shift_factor": 0.09810414107289107
+ }
+}

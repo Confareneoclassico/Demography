@@ -1,0 +1,10 @@
+paradigm	0.2749	0.6321
+fertility_model	0.0117	0.0119
+mortality_model	0.0009	0.0065
+arima_order	0.1942	0.4004
+fertility_scale	0.0061	0.0122
+tfr_floor	-0.0047	0.0009
+tfr_trend_scale	0.0008	0.0013
+e0_gain	0.0002	0.0009
+mort_realization	0.0013	0.0053
+arima_realization	0.1553	0.3133
