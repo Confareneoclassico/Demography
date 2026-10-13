@@ -503,6 +503,8 @@ def generate_sobol_parameters(sample_index, num_samples):
 
 
 if __name__ == '__main__':
+    import time
+    start_time = time.time()
     # Define parameters for analysis
     N_SIMULATIONS = 256 
     

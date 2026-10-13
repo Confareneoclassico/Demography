@@ -1,557 +1,317 @@
 """
-MoMP_world.py
--------------
-Global population projection experiment for
-"What demographic prediction can and cannot achieve".
+MoMP_world.py  (v2 — component-level redesign, Sept 2026)
+---------------------------------------------------------
+Global population MoMP experiment, restructured so the structural forks sit
+where demographic practice actually argues (R1's point): at the level of the
+COMPONENTS of change within the cohort-component paradigm, with the aggregate
+ARIMA paradigm as the structural outsider. Lotka removed (Caswell: it is the
+CC asymptote, not a paradigm; v1 additionally contained a maternity-function
+error — see demographic_models.lotka_intrinsic_r).
 
-Experimental design — two discrete structural variables + continuous parametric:
+Ten uncertain inputs, D = 10, Saltelli N x (D+2) evaluations:
 
-  `paradigm`       (Level 1)  0 = Cohort-Component family
-                              1 = Lotka intrinsic growth rate
-                              2 = ARIMA (statistical, no demographic structure)
+  #  name                 range          active in            role
+  1  paradigm             [0, 1.9999]    all                  L1: 0 CC | 1 ARIMA
+  2  fertility_model      [0, 2.9999]    CC                   L2: const|trend|converge
+  3  mortality_model      [0, 1.9999]    CC                   L2: det. e0 | stoch. index
+  4  arima_order          [0, 3.9999]    ARIMA                L2: 4 (p,d,q) specs
+  5  fertility_scale      [0.90, 1.10]   CC                   level of ASFR   (WPP-PI*)
+  6  tfr_floor            [1.45, 1.95]   CC & f=2             long-run TFR    (WPP-PI*)
+  7  tfr_trend_scale      [0.50, 1.50]   CC & f=1             x fitted decline rate
+  8  e0_gain              [0.10, 0.25]   CC & m=0             yr of e0 per yr (WPP-PI*)
+  9  mort_realization     [0.001,0.999]  CC & m=1             quantile of e0 RWD path
+ 10  arima_realization    [0.001,0.999]  ARIMA                quantile of forecast s.e.
 
-  `mortality_model` (Level 2)  0 = exogenous mortality scaling  (CC only)
-                               1 = Lee-Carter sub-model          (CC only)
+(*) Ranges marked WPP-PI are placeholders anchored on my reading of the WPP
+2024 probabilistic projections; SYNC THESE against the downloaded WPP PI
+files before the paper-grade run and cite the exact interval used.
 
-  Continuous parametric (all paradigms):
-    fertility_scale, mortality_scale, migration_scale, trend_strength
+Migration: identically zero at planetary scale; not an input (stated design
+motivation — removes the component most error-prone at national scale).
 
-  Lee-Carter specific (paradigm=0, mortality_model=1 only):
-    lee_carter_kt_std, lee_carter_error_scale, kt_realization
+Effective configurations (10):
+  CC-const-e0trend  CC-const-stoch   CC-trend-e0trend  CC-trend-stoch
+  CC-conv-e0trend   CC-conv-stoch    ARIMA(0,1,1) (1,2,0) (0,2,1) (2,1,0)
 
-Total: 9 uncertain inputs, sampled via Sobol' quasi-random sequences.
-N = 1024 base samples → 1024*(2*10+2) = 22,528 model evaluations.
+Run:      python MoMP_world.py             (requires ./Data files as before)
+Selftest: python MoMP_world.py --selftest  (synthetic data, N=16, no files)
 """
 
-import os
+import os, sys, time
 import numpy as np
 import pandas as pd
-from scipy.stats import truncnorm
-from SALib.sample import sobol as sobol_sample
-from SALib.analyze import sobol
-import matplotlib.pyplot as plt
-import seaborn as sns
-import matplotlib as mpl
-import warnings
-warnings.filterwarnings("ignore")
 
-from demographic_models_revised import (
-    cohort_component_model,
-    lee_carter_model,
-    lotka_intrinsic_growth_rate_model,
-    aggregate_accounting_step,
-    fit_all_arima_orders,
-    ARIMA_ORDERS,
+from demographic_models import (
+    cohort_component_step, life_expectancy, build_e0_scale_map,
+    survival_for_e0, fit_e0_random_walk, fit_recent_tfr_trend, tfr_path,
+    fit_all_arima_orders, arima_growth_path, ARIMA_ORDERS,
 )
+from scipy.stats import norm
 
-sns.set_theme(style="whitegrid")
-mpl.rcParams.update({
-    "font.family": "serif", "font.size": 14,
-    "axes.labelsize": 14, "axes.titlesize": 16,
-    "xtick.labelsize": 12, "ytick.labelsize": 12,
-    "legend.fontsize": 12, "axes.edgecolor": "black",
-    "axes.linewidth": 0.8, "grid.color": "0.9",
-    "grid.linewidth": 0.8, "savefig.dpi": 300, "figure.dpi": 300,
-})
-
-# ---------------------------------------------------------------------------
-# Sobol' problem definition — symmetric two-level structural design
-# ---------------------------------------------------------------------------
-#
-# Level 1 — `paradigm` (3 options, ~33% each):
-#   0 = Cohort-Component (CC) family
-#   1 = Lotka intrinsic growth rate
-#   2 = ARIMA statistical paradigm
-#
-# Level 2 — sub-model choice within each structured paradigm:
-#   `mortality_model` (CC only):  0=exogenous scaling, 1=Lee-Carter (~17% each)
-#   `arima_order`     (ARIMA only): 0–3 → four ARIMA specifications (~8% each)
-#
-# Both Level-2 variables are sampled independently across ALL simulations
-# but are active only within their respective paradigm. Their S1 indices
-# are attenuated by inactivity; the ST−S1 gap reveals their interaction
-# with `paradigm`. See methods section for full discussion.
-#
-# Effective run breakdown (~% of 22,528 evaluations):
-#   CC + exogenous  (p=0, mm=0): ~16.7%
-#   CC + LeeCarter  (p=0, mm=1): ~16.7%
-#   Lotka           (p=1):       ~33.3%
-#   ARIMA order 0   (p=2, ao=0): ~ 8.3%
-#   ARIMA order 1   (p=2, ao=1): ~ 8.3%
-#   ARIMA order 2   (p=2, ao=2): ~ 8.3%
-#   ARIMA order 3   (p=2, ao=3): ~ 8.3%
+N_YEARS = 52                      # 2024..2075
+YEAR0 = 2023
 
 problem = {
     'num_vars': 10,
-    'names': [
-        'fertility_scale',        # parametric — all paradigms
-        'mortality_scale',        # parametric — all paradigms
-        'migration_scale',        # parametric — dummy (zero at planetary scale)
-        'trend_strength',         # parametric — all paradigms
-        'paradigm',               # Level 1: 0=CC, 1=Lotka, 2=ARIMA
-        'mortality_model',        # Level 2 (CC only): 0=exogenous, 1=Lee-Carter
-        'arima_order',            # Level 2 (ARIMA only): 0–3 → 4 specifications
-        'lee_carter_kt_std',      # Lee-Carter specific (p=0, mm=1 only)
-        'lee_carter_error_scale', # Lee-Carter specific
-        'kt_realization',         # Lee-Carter specific (uniform for inv-CDF)
-    ],
-    'bounds': [
-        [0.85,   1.15  ],  # fertility_scale
-        [0.97,   1.03  ],  # mortality_scale
-        [0.8,    1.2   ],  # migration_scale
-        [0.9,    1.1   ],  # trend_strength
-        [0,      2.9999],  # paradigm
-        [0,      1.9999],  # mortality_model  (CC only)
-        [0,      3.9999],  # arima_order      (ARIMA only)
-        [0.005,  0.08  ],  # lee_carter_kt_std
-        [0.0,    0.1   ],  # lee_carter_error_scale
-        [0.0,    1.0   ],  # kt_realization
-    ]
+    'names': ['paradigm', 'fertility_model', 'mortality_model', 'arima_order',
+              'fertility_scale', 'tfr_floor', 'tfr_trend_scale', 'e0_gain',
+              'mort_realization', 'arima_realization'],
+    'bounds': [[0, 1.9999], [0, 2.9999], [0, 1.9999], [0, 3.9999],
+               [0.90, 1.10], [1.45, 1.95], [0.50, 1.50], [0.10, 0.25],
+               [0.001, 0.999], [0.001, 0.999]],
 }
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def sobol_to_truncated_normal(sobol_value, mean=0, std=1, lower=-1, upper=1):
-    a, b = (lower - mean) / std, (upper - mean) / std
-    return truncnorm(a, b, loc=mean, scale=std).ppf(sobol_value)
+FERT_LABEL = {0: 'const', 1: 'trend', 2: 'conv'}
+MORT_LABEL = {0: 'e0trend', 1: 'stoch'}
 
 
-def get_lee_carter_error_pattern(error_scale, n_ages):
-    return np.full(n_ages, error_scale)
+def effective_label(row):
+    if int(row[0]) == 0:
+        return f"CC-{FERT_LABEL[int(row[1])]}-{MORT_LABEL[int(row[2])]}"
+    return f"ARIMA{ARIMA_ORDERS[int(row[3])]}"
 
 
-def transform_survival_probabilities(base_survival, mortality_scale):
-    base_mortality = 1.0 - base_survival
-    log_odds = np.log(base_mortality / (1 - base_mortality + 1e-9))
-    scaled_log_odds = log_odds * (2.0 - mortality_scale)
-    return 1.0 - 1.0 / (1.0 + np.exp(-scaled_log_odds))
+# --------------------------------------------------------------------------
+def run_simulation(x, data):
+    paradigm      = int(np.floor(x[0]))
+    fert_model    = int(np.floor(x[1]))
+    mort_model    = int(np.floor(x[2]))
+    arima_order   = int(np.floor(x[3]))
+    fert_scale    = x[4]
+    tfr_floor     = x[5]
+    trend_scale   = x[6]
+    e0_gain       = x[7]
+    mort_u        = x[8]
+    arima_u       = x[9]
+
+    if paradigm == 1:                                  # ---- ARIMA ----------
+        g = arima_growth_path(data['arima_fits'][arima_order], arima_u)
+        pop = data['P0'] * np.cumprod(1.0 + g)
+        return pop[N_YEARS - (2075 - 2050) - 1], pop[-1]   # 2050, 2075
+
+    # ---- Cohort-Component ------------------------------------------------
+    tfr = tfr_path(fert_model, N_YEARS, data['tfr0'], fert_scale,
+                   trend_g=data['tfr_trend_g'], trend_scale=trend_scale,
+                   floor=tfr_floor)
+    if mort_model == 0:
+        e0_traj = data['e0_0'] + e0_gain * np.arange(1, N_YEARS + 1)
+    else:
+        z = norm.ppf(mort_u)
+        t = np.arange(1, N_YEARS + 1)
+        e0_traj = data['e0_0'] + data['e0_drift'] * t + data['e0_sigma'] * np.sqrt(t) * z
+
+    pop = data['pop_age_2023'].copy()
+    shape = data['asfr_shape']                          # sums to 1 over 15-49
+    p2050 = p2075 = None
+    for i in range(N_YEARS):
+        S = survival_for_e0(e0_traj[i], data['e0_to_s'], data['mu'])
+        asfr = shape * tfr[i]
+        pop = cohort_component_step(pop, S, asfr)
+        year = YEAR0 + 1 + i
+        if year == 2050: p2050 = pop.sum()
+        if year == 2075: p2075 = pop.sum()
+    return p2050, p2075
 
 
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
-
-def estimate_survival_probabilities_1yr(world_data):
-    survival_probs = np.ones(101)
-    imr  = world_data['Infant Mortality Rate (infant deaths per 1,000 live births)'] / 1000
-    survival_probs[0] = 1 - imr
-    u5   = world_data['Under-Five Mortality (deaths under age 5 per 1,000 live births)'] / 1000
-    child_1_4 = (u5 - imr) / 4
-    for age in range(1, 5):
-        survival_probs[age] = 1 - child_1_4
-    m40 = world_data['Mortality before Age 40, both sexes (deaths under age 40 per 1,000 live births)'] / 1000
-    ann_5_39 = 1 - (1 - m40) ** (1/35)
-    for age in range(5, 40):
-        survival_probs[age] = 1 - ann_5_39
-    m60 = world_data['Mortality before Age 60, both sexes (deaths under age 60 per 1,000 live births)'] / 1000
-    ann_40_59 = 1 - (1 - (m60 - m40)) ** (1/20)
-    for age in range(40, 60):
-        survival_probs[age] = 1 - ann_40_59
-    for age in range(60, 101):
-        mortality = 0.01 * np.exp(0.07 * (age - 60))
-        survival_probs[age] = 1 - min(mortality, 0.99)
-    return survival_probs
-
-
-def estimate_lee_carter_parameters():
-    wpp = pd.read_excel(
-        "./Data/WPP2024_GEN_F01_DEMOGRAPHIC_INDICATORS_COMPACT.xlsx",
-        sheet_name="Estimates", skiprows=16)
-    world = wpp[(wpp['Region, subregion, country or area *'] == 'World') &
-                (wpp['Year'] >= 1950) & (wpp['Year'] <= 2023)]
-    cdr = world['Crude Death Rate (deaths per 1,000 population)'].values
-    n_ages = 101
-    ages = np.arange(n_ages)
-    infant_m   = 0.02  * np.exp(-0.5 * ages[:5])
-    young_m    = 0.001 * np.ones(21)
-    adult_m    = 0.002 * np.exp(0.05 * (np.arange(26, 61) - 26))
-    elderly_m  = 0.01  * np.exp(0.08 * (np.arange(61, 101) - 61))
-    pattern    = np.concatenate([infant_m, young_m, adult_m, elderly_m])
-    lc_a_x = np.log(pattern + 1e-9)
-    lc_b_x = 0.15 * np.exp(-0.03 * ages)
-    lc_e_x_t = np.random.normal(0, 0.05, n_ages)
-    return lc_a_x, lc_b_x, lc_e_x_t
-
-
-def extract_actual_demographic_parameters():
-    wpp = pd.read_excel(
-        "./Data/WPP2024_GEN_F01_DEMOGRAPHIC_INDICATORS_COMPACT.xlsx",
-        sheet_name="Estimates", skiprows=16)
-    w23 = wpp[(wpp['Region, subregion, country or area *'] == 'World') &
-              (wpp['Year'] == 2023)].iloc[0]
-    total_pop = w23['Total Population, as of 1 July (thousands)'] * 1000
-    age_props = np.array([
-        *[0.0130]*5, *[0.0128]*5, *[0.0126]*5, *[0.0124]*5, *[0.0122]*5,
-        *[0.0120]*5, *[0.0118]*5, *[0.0114]*5, *[0.0112]*5, *[0.0110]*5,
-        *[0.0108]*5, *[0.0106]*5, *[0.0104]*5, *[0.0102]*5, *[0.0100]*5,
-        *[0.0098]*5, *[0.0096]*5, *[0.0094]*5, *[0.0092]*5, *[0.0090]*5,
-        0.001
-    ])
-    tfr = w23['Total Fertility Rate (live births per woman)']
-    asfr_ages = np.arange(15, 50)
-    asfr_pat  = np.exp(-0.5 * ((asfr_ages - 27) / 7)**2)
-    asfr_pat  = asfr_pat / asfr_pat.sum() * tfr
-    asfr_base = np.zeros(101)
-    asfr_base[15:50] = asfr_pat
-    lc_a_x, lc_b_x, lc_e_x_t = estimate_lee_carter_parameters()
-    return {
-        'total_population_2023': total_pop,
-        'pop_age_dist': total_pop * age_props,
-        'survival_prob_base': estimate_survival_probabilities_1yr(w23),
-        'asfr_base': asfr_base,
-        'net_migration_base': 0,
-        'net_migration_rate': 0,
-        'lc_a_x': lc_a_x, 'lc_b_x': lc_b_x, 'lc_e_x_t': lc_e_x_t,
-        'crude_birth_rate': w23['Crude Birth Rate (births per 1,000 population)'],
-        'crude_death_rate': w23['Crude Death Rate (deaths per 1,000 population)'],
-        'total_fertility_rate': tfr,
-        'total_births': w23['Births (thousands)'] * 1000,
-        'total_deaths': w23['Total Deaths (thousands)'] * 1000,
-        'life_expectancy': w23['Life Expectancy at Birth, both sexes (years)'],
-    }
-
-
-def load_actual_demographic_data():
-    """Load and pre-compute all data needed by run_simulation."""
-    params = extract_actual_demographic_parameters()
+# --------------------------------------------------------------------------
+def load_real_data():
+    """Load WPP-derived inputs; identical files as v1 (see repo README)."""
+    wpp = pd.read_excel("./Data/WPP2024_GEN_F01_DEMOGRAPHIC_INDICATORS_COMPACT.xlsx",
+                        sheet_name="Estimates", skiprows=16)
+    world = wpp[wpp['Region, subregion, country or area *'] == 'World']
+    w = world[world['Year'] == 2023].iloc[0]
+    e0_series = world[(world['Year'] >= 1950) & (world['Year'] <= 2023)][
+        'Life Expectancy at Birth, both sexes (years)'].values
+    tfr_series = world[(world['Year'] >= 1950) & (world['Year'] <= 2023)][
+        'Total Fertility Rate (live births per woman)'].values
     hist = pd.read_csv("./Data/world_population_combined_1950_2100.csv")
-    historical_pop = (hist[hist["Year"] <= 2023]
-                      ["Total Population, as of 1 July (thousands)"].values * 1000)
+    hist_pop = hist[hist["Year"] <= 2023][
+        "Total Population, as of 1 July (thousands)"].values * 1000.0
 
-    # Pre-fit all candidate ARIMA specifications once at startup.
-    print("  Fitting all ARIMA candidate specifications...")
-    arima_growth_by_order, arima_labels = fit_all_arima_orders(historical_pop)
-    print(f"  ARIMA fitting complete. {len(arima_growth_by_order)} specifications ready.")
-
-    # Apply a minimum survival probability floor to prevent degenerate
-    # Lee-Carter projections at extreme parameter combinations.
-    MIN_SURVIVAL = 0.5   # conservative floor; still allows very high mortality
-    survival_base = np.maximum(params['survival_prob_base'], MIN_SURVIVAL)
-
-    return {
-        'initial_population':    params['total_population_2023'],
-        'historical_population': historical_pop,
-        'pop_age_dist':          params['pop_age_dist'].copy(),
-        'survival_prob_base':    survival_base,
-        'asfr_base':             params['asfr_base'],
-        'net_migration_base':    params['net_migration_base'],
-        'net_migration_rate':    params['net_migration_rate'],
-        'lc_a_x':                params['lc_a_x'],
-        'lc_b_x':                params['lc_b_x'],
-        'lc_e_x_t':              params['lc_e_x_t'],
-        'crude_birth_rate':      params['crude_birth_rate'],
-        'crude_death_rate':      params['crude_death_rate'],
-        'total_fertility_rate':  params['total_fertility_rate'],
-        'arima_growth_by_order': arima_growth_by_order,  # dict: int → (52,) array
-        'arima_labels':          arima_labels,
-    }
+    return build_data(
+        P0=w['Total Population, as of 1 July (thousands)'] * 1000.0,
+        tfr0=float(w['Total Fertility Rate (live births per woman)']),
+        e0_0=float(w['Life Expectancy at Birth, both sexes (years)']),
+        e0_series=e0_series, tfr_series=tfr_series, hist_pop=hist_pop,
+        base_survival=build_base_survival_from_indicators(w))
 
 
-# ---------------------------------------------------------------------------
-# Simulation
-# ---------------------------------------------------------------------------
-
-def run_simulation(params_row, data):
-    """
-    Run one projection from 2024 to 2075 for the given parameter vector.
-
-    Parameters
-    ----------
-    params_row : array-like, length 9
-        [fertility_scale, mortality_scale, migration_scale, trend_strength,
-         paradigm, mortality_model,
-         lee_carter_kt_std, lee_carter_error_scale, kt_realization]
-    data : dict
-        Pre-loaded demographic data from load_actual_demographic_data().
-
-    Returns
-    -------
-    (float, float) : (population_2050_millions, population_2075_millions)
-    """
-    # -- Unpack parameters --------------------------------------------------
-    fertility_scale        = params_row[0]
-    mortality_scale        = params_row[1]
-    migration_scale        = params_row[2]
-    trend_strength         = params_row[3]
-    paradigm               = int(np.floor(params_row[4]))   # 0=CC, 1=Lotka, 2=ARIMA
-    mortality_model        = int(np.floor(params_row[5]))   # 0=exogenous, 1=LeeCarter (CC only)
-    arima_order            = int(np.floor(params_row[6]))   # 0–3 (ARIMA only)
-    lee_carter_kt_std      = params_row[7]
-    lee_carter_error_scale = params_row[8]
-    kt_realization         = params_row[9]
-
-    # -- State variables ----------------------------------------------------
-    current_total_population = data['initial_population']
-    current_pop_age_dist     = data['pop_age_dist'].copy()
-
-    # Pre-compute Lee-Carter k_t (used every year if paradigm=0, mm=1).
-    if paradigm == 0 and mortality_model == 1:
-        k_t_simulated = sobol_to_truncated_normal(
-            kt_realization,
-            mean  = -0.5 * lee_carter_kt_std,
-            std   =  lee_carter_kt_std,
-            lower = -3 * lee_carter_kt_std,
-            upper =  3 * lee_carter_kt_std,
-        )
-        lc_e_x_t = get_lee_carter_error_pattern(
-            lee_carter_error_scale, len(data['lc_a_x'])
-        )
-        predicted_log_mortality = lee_carter_model(
-            data['lc_a_x'], data['lc_b_x'], k_t_simulated, lc_e_x_t
-        )
-        lc_survival = 1 - np.exp(predicted_log_mortality)
-        if np.any(lc_survival < 0) or np.any(lc_survival > 1):
-            lc_survival = np.clip(lc_survival, 0.0, 1.0)
-
-    pop_2050 = pop_2075 = 0.0
-
-    for year_idx in range(1, 53):   # 2024 → 2075 (52 steps)
-        current_year = 2023 + year_idx
-        years_from_start = year_idx - 1
-
-        # Time-varying parametric scalings
-        current_fertility_scale = fertility_scale * (1 - 0.01 * trend_strength) ** years_from_start
-        current_mortality_scale = mortality_scale * (1 - 0.005 * trend_strength) ** years_from_start
-        current_migration_scale = migration_scale * (1 + 0.001 * trend_strength) ** years_from_start
-
-        current_asfr      = data['asfr_base'] * current_fertility_scale
-        current_survival  = transform_survival_probabilities(
-            data['survival_prob_base'], current_mortality_scale
-        )
-        current_migration = data['net_migration_base'] * current_migration_scale
-
-        # ==================================================================
-        # Paradigm = 0: Cohort-Component family
-        # ==================================================================
-        if paradigm == 0:
-
-            if mortality_model == 0:
-                # -- Level 2 sub-model 0: exogenous mortality scaling ------
-                current_pop_age_dist = cohort_component_model(
-                    current_pop_age_dist,
-                    current_survival,
-                    current_asfr,
-                    current_migration,
-                )
-                current_total_population = np.sum(current_pop_age_dist)
-
-            else:
-                # -- Level 2 sub-model 1: Lee-Carter mortality embedded ----
-                # Lee-Carter survival was pre-computed above; apply
-                # parametric mortality scaling on top.
-                lc_surv_scaled = transform_survival_probabilities(
-                    lc_survival, current_mortality_scale
-                )
-                lc_crude_death = (
-                    np.sum((1 - lc_surv_scaled) * current_pop_age_dist)
-                    / current_total_population * 1000
-                )
-                total_deaths    = current_total_population * lc_crude_death / 1000
-                total_births    = (current_total_population
-                                   * data['crude_birth_rate']
-                                   * current_fertility_scale / 1000)
-                total_migration = (current_total_population
-                                   * data['net_migration_rate']
-                                   * current_migration_scale / 1000)
-                current_total_population = aggregate_accounting_step(
-                    current_total_population,
-                    total_deaths, total_births, total_migration,
-                )
-
-        # ==================================================================
-        # Paradigm = 1: Lotka intrinsic growth rate
-        # ==================================================================
-        elif paradigm == 1:
-            l_x   = np.cumprod(np.insert(current_survival[:-1], 0, 1.0))
-            r_val = lotka_intrinsic_growth_rate_model(l_x, current_asfr)
-            current_total_population *= np.exp(r_val)
-
-        # ==================================================================
-        # Paradigm = 2: ARIMA — statistical paradigm, no demographic structure.
-        # Sub-model choice: arima_order selects among four pre-fitted ARIMA
-        # specifications (see ARIMA_ORDERS in demographic_models.py).
-        # Parametric perturbations are applied as additive adjustments to the
-        # ARIMA-implied growth rate, using global crude rates as conversion.
-        # ==================================================================
-        elif paradigm == 2:
-            g_arima = data['arima_growth_by_order'][arima_order][year_idx - 1]
-            CBR = data['crude_birth_rate'] / 1000
-            CDR = data['crude_death_rate'] / 1000
-            g_adjusted = (g_arima * trend_strength
-                          + (current_fertility_scale - 1) * CBR
-                          - (current_mortality_scale - 1) * CDR)
-            current_total_population *= (1 + g_adjusted)
-
-        # Record outputs
-        if current_year == 2050:
-            pop_2050 = current_total_population
-        if current_year == 2075:
-            pop_2075 = current_total_population
-
-    return pop_2050 / 1e6, pop_2075 / 1e6   # return in millions
+def build_base_survival_from_indicators(w):
+    """Single-year survival schedule from the WPP summary indicators
+    (unchanged logic from v1; the schedule is then anchored to e0 via the
+    proportional-hazard map, so residual shape error affects levels little)."""
+    S = np.ones(101)
+    imr = w['Infant Mortality Rate (infant deaths per 1,000 live births)'] / 1000
+    S[0] = 1 - imr
+    u5 = w['Under-Five Mortality (deaths under age 5 per 1,000 live births)'] / 1000
+    S[1:5] = 1 - (u5 - imr) / 4
+    m40 = w['Mortality before Age 40, both sexes (deaths under age 40 per 1,000 live births)'] / 1000
+    S[5:40] = 1 - (1 - (1 - m40) ** (1 / 35))
+    m60 = w['Mortality before Age 60, both sexes (deaths under age 60 per 1,000 live births)'] / 1000
+    S[40:60] = 1 - (1 - (1 - (m60 - m40)) ** (1 / 20))
+    ages = np.arange(60, 101)
+    S[60:] = 1 - np.minimum(0.01 * np.exp(0.07 * (ages - 60)), 0.99)
+    return S
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def build_data(P0, tfr0, e0_0, e0_series, tfr_series, hist_pop, base_survival,
+               age_shares=None):
+    if age_shares is None:                      # smooth plausible world shares
+        raw = np.exp(-0.5 * ((np.arange(101) - 0) / 55.0) ** 2) + 0.15
+        raw[85:] *= np.linspace(1, 0.15, 16)
+        age_shares = raw / raw.sum()
+    # anchor the baseline schedule so its e0 equals the observed e0_0
+    e0_to_s, mu = build_e0_scale_map(base_survival)
+    base_anchored = survival_for_e0(e0_0, e0_to_s, mu)
+    e0_to_s, mu = build_e0_scale_map(base_anchored)
 
+    sh = np.zeros(101)
+    g = np.exp(-0.5 * ((np.arange(15, 50) - 27) / 7.0) ** 2)
+    sh[15:50] = g / g.sum()
+
+    E0_FIT_YEARS = 30   # fit window for the e0 random walk (last 30 annual
+                        # increments, 1993-2023, COVID included); full-series
+                        # drift overstates the current pace of improvement.
+    drift, sigma = fit_e0_random_walk(e0_series[-(E0_FIT_YEARS + 1):])
+    d_full, s_full = fit_e0_random_walk(e0_series)
+    print(f"  e0 RWD (full series, for reference): drift {d_full:+.3f}, sigma {s_full:.3f}")
+    print(f"  e0 RWD fit: drift {drift:+.3f} yr/yr, sigma {sigma:.3f}")
+    trend_g = fit_recent_tfr_trend(tfr_series, years=20)
+    print(f"  TFR recent log-trend: {trend_g:+.4f}/yr "
+          f"(~{100*(np.exp(trend_g)-1):+.2f}%/yr)")
+    print("  fitting ARIMA candidates...")
+    arima_fits, labels = fit_all_arima_orders(hist_pop, n_steps=N_YEARS)
+
+    return dict(P0=P0, tfr0=tfr0, e0_0=e0_0,
+                pop_age_2023=P0 * age_shares, asfr_shape=sh,
+                e0_to_s=e0_to_s, mu=mu, e0_drift=drift, e0_sigma=sigma,
+                tfr_trend_g=trend_g, arima_fits=arima_fits)
+
+
+def make_synthetic_data():
+    """Selftest fixture: plausible world-like series, no files needed."""
+    yrs = np.arange(1950, 2024)
+    e0_series = 47 + 26.5 * (1 - np.exp(-(yrs - 1950) / 30.0))     # 47 -> ~73.4
+    tfr_series = 1.55 + 3.45 * np.exp(-(yrs - 1950) / 33.0)        # ~5 -> ~2.25
+    hist_pop = 2.5e9 * np.exp(np.cumsum(
+        np.concatenate([[0], 0.021 * np.exp(-(yrs[1:] - 1950) / 55.0)])))
+    A = 101; ages = np.arange(A)
+    q = np.full(A, 0.0012); q[0] = 0.027; q[1:5] = 0.0023
+    q[40:60] = 0.004; q[60:] = np.minimum(0.011 * np.exp(0.075 * (ages[60:] - 60)), .6)
+    return build_data(P0=8.09e9, tfr0=2.25, e0_0=73.4,
+                      e0_series=e0_series, tfr_series=tfr_series,
+                      hist_pop=hist_pop, base_survival=1 - q)
+
+
+# --------------------------------------------------------------------------
 if __name__ == '__main__':
-    os.makedirs('./figures', exist_ok=True)
+    selftest = '--selftest' in sys.argv
     os.makedirs('./results', exist_ok=True)
 
-    print("Loading demographic data...")
-    demographic_data = load_actual_demographic_data()
-    print("Data loaded.\n")
+    print("Loading data..." + (" (synthetic selftest)" if selftest else ""))
+    data = make_synthetic_data() if selftest else load_real_data()
 
-    # Sobol' quasi-random sample
-    N_BASE = 1024
-    param_values = sobol_sample.sample(
-        problem, N_BASE, calc_second_order=True, scramble=True, seed=42
-    )
-    print(f"Generated {len(param_values)} parameter vectors "
-          f"({N_BASE} base samples, D={problem['num_vars']}).\n")
+    from SALib.sample import sobol as sobol_sample
+    from SALib.analyze import sobol as sobol_an
 
-    Y_2050, Y_2075 = [], []
-    for i, row in enumerate(param_values):
-        if (i + 1) % 500 == 0 or i == 0:
-            print(f"  Simulation {i+1}/{len(param_values)} ...")
-        p2050, p2075 = run_simulation(row, demographic_data)
-        Y_2050.append(p2050)
-        Y_2075.append(p2075)
+    import os as _os
+    N = int(_os.environ.get('N_BASE', 16 if selftest else 2048))
+    # Same design as the Song audit: N(k+2) runs, first- and total-order
+    # indices only (no second-order block).
+    X = sobol_sample.sample(problem, N, calc_second_order=False,
+                            scramble=True, seed=42)
+    print(f"{len(X)} evaluations (N={N}, D={problem['num_vars']})")
 
-    Y_2050 = np.array(Y_2050)
-    Y_2075 = np.array(Y_2075)
+    t0 = time.time()
+    Y50 = np.empty(len(X)); Y75 = np.empty(len(X))
+    for i, row in enumerate(X):
+        a, b = run_simulation(row, data)
+        Y50[i], Y75[i] = a / 1e6, b / 1e6            # millions
+        if (i + 1) % 2000 == 0:
+            print(f"  {i+1}/{len(X)}  ({time.time()-t0:.0f}s)", flush=True)
+    print(f"simulation loop: {time.time()-t0:.0f}s")
 
-    # -- Save results -------------------------------------------------------
-    from demographic_models_revised import ARIMA_ORDERS as _ARIMA_ORDERS
-    pars  = np.floor(param_values[:, 4]).astype(int)
-    mm    = np.floor(param_values[:, 5]).astype(int)
-    ao    = np.floor(param_values[:, 6]).astype(int)
+    lab = np.array([effective_label(r) for r in X])
+    df = pd.DataFrame(X, columns=problem['names'])
+    df['effective_run'] = lab
+    df['population_2050_millions'] = Y50
+    df['population_2075_millions'] = Y75
+    df.to_csv('./results/simulation_results_v2.csv', index=False)
 
-    def _run_label(p, m, a):
-        if p == 0:
-            return 'CC-exogenous' if m == 0 else 'CC-LeeCarter'
-        elif p == 1:
-            return 'Lotka'
-        else:
-            order = _ARIMA_ORDERS[a] if a < len(_ARIMA_ORDERS) else _ARIMA_ORDERS[-1]
-            return f'ARIMA{order}'
+    print("\nPer-configuration medians, 2075 (billions):")
+    med = df.groupby('effective_run')['population_2075_millions'].median() / 1000
+    for k, v in med.sort_values().items():
+        print(f"   {k:22s} {v:6.2f}B")
+    print(f"\nOverall 2075: {Y75.min()/1e3:.2f}–{Y75.max()/1e3:.2f}B, "
+          f"mean {Y75.mean()/1e3:.2f}B; 2050 mean {Y50.mean()/1e3:.2f}B")
 
-    effective_run = np.array([_run_label(pars[i], mm[i], ao[i])
-                               for i in range(len(pars))])
+    import json as _json
+    from demographic_models import ot_indices_given_data as _ot
 
-    results_df = pd.DataFrame(param_values, columns=problem['names'])
-    results_df['effective_run']          = effective_run
-    results_df['population_2050_millions'] = Y_2050
-    results_df['population_2075_millions'] = Y_2075
-    results_df.to_csv('./results/simulation_results_actual.csv', index=False)
-    print("\nSimulation results saved to ./results/simulation_results_actual.csv")
+    summary = {'stats': {}, 'sobol': {}, 'ot': {},
+               'fits': dict(e0_drift=float(data['e0_drift']),
+                            e0_sigma=float(data['e0_sigma']),
+                            tfr_trend=float(data['tfr_trend_g']))}
+    try:
+        _hist = pd.read_csv('./Data/world_population_combined_1950_2100.csv')
+        summary['un_medium'] = {str(y): float(
+            _hist[_hist.Year == y]['Total Population, as of 1 July (thousands)'
+                                   ].values[0] / 1e6)
+            for y in (2050, 2075)}
+    except Exception:
+        summary['un_medium'] = {}
 
-    # -- Sobol' sensitivity analysis ----------------------------------------
-    Si_2050 = sobol.analyze(problem, Y_2050, calc_second_order=True,
-                             print_to_console=False)
-    Si_2075 = sobol.analyze(problem, Y_2075, calc_second_order=True,
-                             print_to_console=False)
+    X_ot = param_values.copy() if 'param_values' in dir() else X.copy()
+    for _j, _n in enumerate(problem['names']):
+        if _n in ('paradigm', 'fertility_model', 'mortality_model', 'arima_order'):
+            X_ot[:, _j] = np.floor(X_ot[:, _j]) + 1
 
-    print("\nSobol' Sensitivity Indices — 2050:")
-    print(f"{'Parameter':<28} {'S1':>8} {'ST':>8}")
-    for j, name in enumerate(problem['names']):
-        print(f"  {name:<26} {Si_2050['S1'][j]:>8.3f} {Si_2050['ST'][j]:>8.3f}")
+    for tag, Y in (('2050', Y50), ('2075', Y75)):
+        Si = sobol_an.analyze(problem, Y, calc_second_order=False,
+                              print_to_console=False)
+        print(f"\nSobol' indices — {tag}:")
+        print(f"{'input':22s} {'S1':>7s} {'ST':>7s}")
+        for j, n in enumerate(problem['names']):
+            print(f"  {n:20s} {Si['S1'][j]:7.3f} {Si['ST'][j]:7.3f}")
+        with open(f'./results/sobol_v2_{tag}.txt', 'w') as f:
+            for j, n in enumerate(problem['names']):
+                f.write(f"{n}\t{Si['S1'][j]:.4f}\t{Si['ST'][j]:.4f}\n")
 
-    print("\nSobol' Sensitivity Indices — 2075:")
-    print(f"{'Parameter':<28} {'S1':>8} {'ST':>8}")
-    for j, name in enumerate(problem['names']):
-        print(f"  {name:<26} {Si_2075['S1'][j]:>8.3f} {Si_2075['ST'][j]:>8.3f}")
+        summary['sobol'][tag] = {n: (float(Si['S1'][j]), float(Si['ST'][j]))
+                                 for j, n in enumerate(problem['names'])}
+        _oti = _ot(X_ot, Y, M=25)
+        summary['ot'][tag] = {n: float(_oti[j])
+                              for j, n in enumerate(problem['names'])}
+        g = df.groupby('effective_run')[f'population_{tag}_millions']
+        summary['stats'][tag] = {k: dict(med=float(v.median()/1e3),
+                                         p5=float(v.quantile(.05)/1e3),
+                                         p95=float(v.quantile(.95)/1e3),
+                                         n=int(len(v)))
+                                 for k, v in g}
+        summary['stats'][tag]['_overall'] = dict(
+            mean=float(Y.mean()/1e3), lo=float(Y.min()/1e3),
+            hi=float(Y.max()/1e3),
+            p5=float(np.quantile(Y, .05)/1e3), p95=float(np.quantile(Y, .95)/1e3))
 
-    with open('./results/sobol_results.txt', 'w') as f:
-        f.write("Sobol' Analysis Results\n\n")
-        for label, Si in [('2050', Si_2050), ('2075', Si_2075)]:
-            f.write(f"--- {label} Projections ---\n")
-            f.write(f"{'Parameter':<28} S1        ST\n")
-            for j, name in enumerate(problem['names']):
-                f.write(f"  {name:<26} {Si['S1'][j]:.4f}    {Si['ST'][j]:.4f}\n")
-            f.write("\n")
-    print("Sobol' results saved to ./results/sobol_results.txt")
+    with open('./results/momp_v2_summary.json', 'w') as f:
+        _json.dump(summary, f, indent=1)
+    print("\nSummary written to ./results/momp_v2_summary.json")
 
-    # -- Summary statistics -------------------------------------------------
-    hist_csv = pd.read_csv("./Data/world_population_combined_1950_2100.csv")
-    # Column is in thousands; divide by 1e6 to convert to billions.
-    un_2050  = hist_csv[hist_csv["Year"] == 2050][
-        "Total Population, as of 1 July (thousands)"].values[0] / 1e6
-    un_2075  = hist_csv[hist_csv["Year"] == 2075][
-        "Total Population, as of 1 July (thousands)"].values[0] / 1e6
-    print(f"\nUN medium projection: 2050 = {un_2050:.2f}B,  2075 = {un_2075:.2f}B")
-    print(f"Simulation range:     2050 = {Y_2050.min()/1000:.2f}–{Y_2050.max()/1000:.2f}B ({Y_2050.min():.0f}–{Y_2050.max():.0f}M)")
-    print(f"                      2075 = {Y_2075.min()/1000:.2f}–{Y_2075.max()/1000:.2f}B ({Y_2075.min():.0f}–{Y_2075.max():.0f}M)")
-    print(f"Simulation mean:      2050 = {Y_2050.mean()/1000:.2f}B,  2075 = {Y_2075.mean()/1000:.2f}B")
-
-    # -- Scatter plots -------------------------------------------------------
-    from demographic_models_revised import ARIMA_ORDERS as _AO
-    run_colors = {
-        'CC-exogenous':  '#2166ac',
-        'CC-LeeCarter':  '#4dac26',
-        'Lotka':         '#d7191c',
-        f'ARIMA{_AO[0]}': '#f4a582',
-        f'ARIMA{_AO[1]}': '#fdae61',
-        f'ARIMA{_AO[2]}': '#e6ab02',
-        f'ARIMA{_AO[3]}': '#a6761d',
-    }
-
-    # Discrete parameters whose raw sampled values cluster at integer positions.
-    # Horizontal jitter is applied to spread overlapping dots.
-    DISCRETE_PARAMS = {'paradigm', 'mortality_model', 'arima_order'}
-    JITTER = {'paradigm': 0.08, 'mortality_model': 0.06, 'arima_order': 0.08}
-
-    for year, Y, label in [('2050', Y_2050, 'population_2050_millions'),
-                            ('2075', Y_2075, 'population_2075_millions')]:
-        plot_df = pd.DataFrame(param_values, columns=problem['names'])
-        plot_df[label]           = Y
-        plot_df['effective_run'] = effective_run
-        plot_df_sub = plot_df.iloc[::16].copy().reset_index(drop=True)
-
-        for param_name in problem['names']:
-            # Wider figure for discrete params to accommodate the outside legend
-            is_discrete = param_name in DISCRETE_PARAMS
-            fig, ax = plt.subplots(figsize=(7, 4))
-
-            rng = np.random.default_rng(seed=42)
-
-            for run, color in run_colors.items():
-                mask = plot_df_sub['effective_run'] == run
-                sub  = plot_df_sub.loc[mask]
-                if sub.empty:
-                    continue
-
-                x_vals = sub[param_name].values.copy()
-                if is_discrete:
-                    x_vals = x_vals + rng.uniform(
-                        -JITTER[param_name], JITTER[param_name], size=len(x_vals)
-                    )
-
-                ax.scatter(x_vals, sub[label].values,
-                           color=color, alpha=0.45, s=28,
-                           edgecolors='none', label=run)
-
-            ax.set_xlabel(param_name.replace('_', ' ').capitalize(), fontsize=12)
-            ax.set_ylabel('Population (millions)', fontsize=12)
-            ax.xaxis.set_major_locator(plt.MaxNLocator(5))
-            sns.despine(ax=ax)
-
-            if is_discrete:
-                # Legend placed outside the right edge — colours are the same
-                # across all individual scatter plots so this acts as a shared key.
-                ax.legend(fontsize=8, framealpha=0.8,
-                          loc='upper left',
-                          bbox_to_anchor=(1.01, 1.0),
-                          borderaxespad=0)
-                plt.tight_layout()
-                plt.savefig(f'./figures/scatter_{year}_{param_name}.png',
-                            dpi=300, bbox_inches='tight')
-            else:
-                plt.tight_layout()
-                plt.savefig(f'./figures/scatter_{year}_{param_name}.png', dpi=300)
-            plt.close()
-
-    print("\nScatter plots saved to ./figures/")
+    # Uncertainty distributions stacked by configuration (Figure 4 of the paper)
+    import matplotlib; matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    os.makedirs('./figures', exist_ok=True)
+    order = sorted([k for k in summary['stats']['2075'] if k != '_overall'],
+                   key=lambda k: summary['stats']['2075'][k]['med'])
+    cmap = plt.get_cmap('tab10')
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.8))
+    for ax, tag, Yv in ((axes[0], '2050', Y50), (axes[1], '2075', Y75)):
+        arrs = [df.loc[df.effective_run == k, f'population_{tag}_millions'].values / 1e3 for k in order]
+        ax.hist(arrs, bins=48, stacked=True, color=[cmap(i % 10) for i in range(len(order))],
+                label=order, alpha=.92)
+        if summary['un_medium'].get(tag):
+            ax.axvline(summary['un_medium'][tag], color='k', ls=':', lw=1.4, label='UN medium')
+        ax.set_xlabel(f'Projected population {tag} (billions)'); ax.set_ylabel('Runs'); ax.set_title(tag)
+    axes[1].legend(fontsize=7, framealpha=.9)
+    plt.tight_layout(); plt.savefig('./figures/uncertainty_distributions_world.png', dpi=300)
+    print("figure: ./figures/uncertainty_distributions_world.png")
