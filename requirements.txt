@@ -6,3 +6,4 @@ seaborn>=0.13
 SALib>=1.5
 statsmodels>=0.14
 openpyxl>=3.1
+numba>=0.60

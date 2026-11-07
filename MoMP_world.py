@@ -42,8 +42,8 @@ import numpy as np
 import pandas as pd
 
 from demographic_models import (
-    cohort_component_step, life_expectancy, build_e0_scale_map,
-    survival_for_e0, fit_e0_random_walk, fit_recent_tfr_trend, tfr_path,
+    build_e0_scale_map, hazard_factor_for_e0, life_expectancy_from_mx, survivorship,
+    project_two_sex, fit_e0_random_walk, fit_recent_tfr_trend, tfr_path,
     fit_all_arima_orders, arima_growth_path, ARIMA_ORDERS,
 )
 from scipy.stats import norm
@@ -99,23 +99,31 @@ def run_simulation(x, data):
         z = norm.ppf(mort_u)
         t = np.arange(1, N_YEARS + 1)
         e0_traj = data['e0_0'] + data['e0_drift'] * t + data['e0_sigma'] * np.sqrt(t) * z
+    return project_cc(data, tfr, e0_traj)
 
-    pop = data['pop_age_2023'].copy()
-    shape = data['asfr_shape']                          # sums to 1 over 15-49
-    p2050 = p2075 = None
-    for i in range(N_YEARS):
-        S = survival_for_e0(e0_traj[i], data['e0_to_s'], data['mu'])
-        asfr = shape * tfr[i]
-        pop = cohort_component_step(pop, S, asfr)
+
+def project_cc(data, tfr, e0_traj, years=(2050, 2075)):
+    """Cohort-component projection 2024..2075 for given TFR and e0 paths
+    (t = 1..52); returns the totals in the requested years."""
+    F, M = data['popF'].copy(), data['popM'].copy()
+    out = {}
+    for i in range(len(tfr)):
+        s = hazard_factor_for_e0(e0_traj[i], data['e0_to_s'])
+        LF, TF_, LM, TM_ = survivorship(data['mxF'], data['mxM'], s)
+        F, M = project_two_sex(F, M, data['fert_pattern'] * tfr[i], LF, TF_, LM, TM_)
         year = YEAR0 + 1 + i
-        if year == 2050: p2050 = pop.sum()
-        if year == 2075: p2075 = pop.sum()
-    return p2050, p2075
+        if year in years:
+            out[year] = F.sum() + M.sum()
+    return tuple(out[y] for y in years)
 
 
 # --------------------------------------------------------------------------
 def load_real_data():
-    """Load WPP-derived inputs; identical files as v1 (see repo README)."""
+    """WPP 2024 inputs: indicators (Data/WPP2024_GEN_F01_...xlsx), the world
+    population series, and the world's single-age population by sex on
+    1 July 2023, single-age death rates by sex in 2023 and the age pattern of
+    fertility in 2023 (Data/wpp2024_world_2023_single_age.csv, extracted from
+    the wpp2024 data package; see README)."""
     wpp = pd.read_excel("./Data/WPP2024_GEN_F01_DEMOGRAPHIC_INDICATORS_COMPACT.xlsx",
                         sheet_name="Estimates", skiprows=16)
     world = wpp[wpp['Region, subregion, country or area *'] == 'World']
@@ -127,47 +135,26 @@ def load_real_data():
     hist = pd.read_csv("./Data/world_population_combined_1950_2100.csv")
     hist_pop = hist[hist["Year"] <= 2023][
         "Total Population, as of 1 July (thousands)"].values * 1000.0
+    single = pd.read_csv("./Data/wpp2024_world_2023_single_age.csv")
 
     return build_data(
         P0=w['Total Population, as of 1 July (thousands)'] * 1000.0,
         tfr0=float(w['Total Fertility Rate (live births per woman)']),
         e0_0=float(w['Life Expectancy at Birth, both sexes (years)']),
         e0_series=e0_series, tfr_series=tfr_series, hist_pop=hist_pop,
-        base_survival=build_base_survival_from_indicators(w))
+        single=single)
 
 
-def build_base_survival_from_indicators(w):
-    """Single-year survival schedule from the WPP summary indicators
-    (unchanged logic from v1; the schedule is then anchored to e0 via the
-    proportional-hazard map, so residual shape error affects levels little)."""
-    S = np.ones(101)
-    imr = w['Infant Mortality Rate (infant deaths per 1,000 live births)'] / 1000
-    S[0] = 1 - imr
-    u5 = w['Under-Five Mortality (deaths under age 5 per 1,000 live births)'] / 1000
-    S[1:5] = 1 - (u5 - imr) / 4
-    m40 = w['Mortality before Age 40, both sexes (deaths under age 40 per 1,000 live births)'] / 1000
-    S[5:40] = 1 - (1 - (1 - m40) ** (1 / 35))
-    m60 = w['Mortality before Age 60, both sexes (deaths under age 60 per 1,000 live births)'] / 1000
-    S[40:60] = 1 - (1 - (1 - (m60 - m40)) ** (1 / 20))
-    ages = np.arange(60, 101)
-    S[60:] = 1 - np.minimum(0.01 * np.exp(0.07 * (ages - 60)), 0.99)
-    return S
-
-
-def build_data(P0, tfr0, e0_0, e0_series, tfr_series, hist_pop, base_survival,
-               age_shares=None):
-    if age_shares is None:                      # smooth plausible world shares
-        raw = np.exp(-0.5 * ((np.arange(101) - 0) / 55.0) ** 2) + 0.15
-        raw[85:] *= np.linspace(1, 0.15, 16)
-        age_shares = raw / raw.sum()
-    # anchor the baseline schedule so its e0 equals the observed e0_0
-    e0_to_s, mu = build_e0_scale_map(base_survival)
-    base_anchored = survival_for_e0(e0_0, e0_to_s, mu)
-    e0_to_s, mu = build_e0_scale_map(base_anchored)
-
-    sh = np.zeros(101)
-    g = np.exp(-0.5 * ((np.arange(15, 50) - 27) / 7.0) ** 2)
-    sh[15:50] = g / g.sum()
+def build_data(P0, tfr0, e0_0, e0_series, tfr_series, hist_pop, single):
+    popF = single.popF.values * 1000.0
+    popM = single.popM.values * 1000.0
+    assert abs((popF.sum() + popM.sum()) / P0 - 1) < 1e-6, "single-age population must add up to P0"
+    pattern = single.pasfr.values / single.pasfr.values.sum()     # sums to one over ages 10-54
+    mxF, mxM, mxB = single.mxF.values, single.mxM.values, single.mxB.values
+    e0_to_s = build_e0_scale_map(mxB)
+    e0_base = life_expectancy_from_mx(mxB)
+    print(f"  life table from WPP single-age mx: e0 {e0_base:.2f} (WPP indicator {e0_0:.2f})")
+    assert abs(e0_base - e0_0) < 0.05, "life table does not reproduce WPP e0"
 
     E0_FIT_YEARS = 30   # fit window for the e0 random walk (last 30 annual
                         # increments, 1993-2023, COVID included); full-series
@@ -182,25 +169,43 @@ def build_data(P0, tfr0, e0_0, e0_series, tfr_series, hist_pop, base_survival,
     print("  fitting ARIMA candidates...")
     arima_fits, labels = fit_all_arima_orders(hist_pop, n_steps=N_YEARS)
 
-    return dict(P0=P0, tfr0=tfr0, e0_0=e0_0,
-                pop_age_2023=P0 * age_shares, asfr_shape=sh,
-                e0_to_s=e0_to_s, mu=mu, e0_drift=drift, e0_sigma=sigma,
+    return dict(P0=P0, tfr0=tfr0, e0_0=e0_0, popF=popF, popM=popM,
+                fert_pattern=pattern, mxF=mxF, mxM=mxM, mxB=mxB,
+                e0_to_s=e0_to_s, e0_drift=drift, e0_sigma=sigma,
                 tfr_trend_g=trend_g, arima_fits=arima_fits)
 
 
+def validate_engine(data):
+    """Run the cohort-component engine with the WPP 2024 medium-variant TFR
+    and e0 paths for 2024-2075 and compare its totals with WPP's medium
+    variant (age patterns of fertility and mortality held at their 2023
+    shapes, which WPP lets change)."""
+    med = pd.read_excel("./Data/WPP2024_GEN_F01_DEMOGRAPHIC_INDICATORS_COMPACT.xlsx",
+                        sheet_name="Medium variant", skiprows=16)
+    med = med[med['Region, subregion, country or area *'] == 'World'].set_index('Year')
+    yrs = np.arange(2024, 2076)
+    tfr = med.loc[yrs, 'Total Fertility Rate (live births per woman)'].values.astype(float)
+    e0 = med.loc[yrs, 'Life Expectancy at Birth, both sexes (years)'].values.astype(float)
+    p50, p75 = project_cc(data, tfr, e0)
+    w50, w75 = (float(med.loc[y, 'Total Population, as of 1 July (thousands)']) * 1000 for y in (2050, 2075))
+    out = {'2050': dict(engine=p50 / 1e9, wpp=w50 / 1e9), '2075': dict(engine=p75 / 1e9, wpp=w75 / 1e9)}
+    for k, v in out.items():
+        v['rel_diff'] = v['engine'] / v['wpp'] - 1
+        print(f"  engine check {k}: engine {v['engine']:.3f}B vs WPP medium {v['wpp']:.3f}B ({100*v['rel_diff']:+.2f}%)")
+    return out
+
+
 def make_synthetic_data():
-    """Selftest fixture: plausible world-like series, no files needed."""
+    """Selftest fixture: WPP single-age structure with synthetic histories."""
     yrs = np.arange(1950, 2024)
-    e0_series = 47 + 26.5 * (1 - np.exp(-(yrs - 1950) / 30.0))     # 47 -> ~73.4
-    tfr_series = 1.55 + 3.45 * np.exp(-(yrs - 1950) / 33.0)        # ~5 -> ~2.25
+    e0_series = 46.4 + 26.8 * (1 - np.exp(-(yrs - 1950) / 30.0))
+    tfr_series = 1.55 + 3.45 * np.exp(-(yrs - 1950) / 33.0)
     hist_pop = 2.5e9 * np.exp(np.cumsum(
         np.concatenate([[0], 0.021 * np.exp(-(yrs[1:] - 1950) / 55.0)])))
-    A = 101; ages = np.arange(A)
-    q = np.full(A, 0.0012); q[0] = 0.027; q[1:5] = 0.0023
-    q[40:60] = 0.004; q[60:] = np.minimum(0.011 * np.exp(0.075 * (ages[60:] - 60)), .6)
-    return build_data(P0=8.09e9, tfr0=2.25, e0_0=73.4,
-                      e0_series=e0_series, tfr_series=tfr_series,
-                      hist_pop=hist_pop, base_survival=1 - q)
+    single = pd.read_csv("./Data/wpp2024_world_2023_single_age.csv")
+    P0 = (single.popF.sum() + single.popM.sum()) * 1000.0
+    return build_data(P0=P0, tfr0=2.25, e0_0=73.17, e0_series=e0_series,
+                      tfr_series=tfr_series, hist_pop=hist_pop, single=single)
 
 
 # --------------------------------------------------------------------------
@@ -249,6 +254,7 @@ if __name__ == '__main__':
     from demographic_models import ot_indices_given_data as _ot
 
     summary = {'stats': {}, 'sobol': {}, 'ot': {},
+               'engine_check': ({} if selftest else validate_engine(data)),
                'fits': dict(e0_drift=float(data['e0_drift']),
                             e0_sigma=float(data['e0_sigma']),
                             tfr_trend=float(data['tfr_trend_g']))}
@@ -261,7 +267,7 @@ if __name__ == '__main__':
     except Exception:
         summary['un_medium'] = {}
 
-    X_ot = param_values.copy() if 'param_values' in dir() else X.copy()
+    X_ot = X.copy()
     for _j, _n in enumerate(problem['names']):
         if _n in ('paradigm', 'fertility_model', 'mortality_model', 'arima_order'):
             X_ot[:, _j] = np.floor(X_ot[:, _j]) + 1

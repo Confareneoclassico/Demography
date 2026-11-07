@@ -28,10 +28,19 @@ Design implemented here:
         0 → deterministic trend e0(t) = e0₀ + γ·t          (γ uncertain)
         1 → stochastic index    e0(t) = e0₀ + d̂·t + σ̂·√t·Φ⁻¹(u)
                                  (random-walk-with-drift fitted to the
-                                  1950–2023 world e0 series — the Lee-Carter
+                                  1993–2023 world e0 series — the Lee-Carter
                                   k_t logic applied to the life-expectancy
-                                  index, without pretending to a full
-                                  age-pattern fit we lack life tables for)
+                                  index)
+        Either path is turned into age-specific mortality by scaling the WPP
+        2024 single-age death rates of 2023 (both sexes, and each sex) by a
+        common proportional-hazard factor chosen so that the both-sex life
+        table has the target e0, bounded to E0_CAP.
+
+  Cohort-component projection (revised Nov 2026, see CHANGELOG.md): two
+  sexes, single years of age 0-99 and 100+, base population and age pattern
+  of fertility from WPP 2024 (world, 1 July 2023), survivorship ratios from
+  single-year life tables (Preston, Heuveline & Guillot 2001, ch. 3 and 6),
+  births from the average female exposure over the year.
     ARIMA arima_order: four (p,d,q) specifications (unchanged from v1)
     ARIMA statistical uncertainty: quantile path from the forecast s.e.
 
@@ -51,63 +60,97 @@ from scipy.optimize import root_scalar
 from scipy.interpolate import interp1d
 from scipy.stats import norm
 
-FEMALE_BIRTH_SHARE = 0.4854   # sex ratio at birth ~106 males/100 females (WPP)
+FEMALE_BIRTH_SHARE = 0.4854   # female share of births (sex ratio at birth ~106 males per 100 females)
 TFR_MIN = 0.8                 # floor for trend extrapolation (≈ lowest observed)
 CONV_TAU = 30.0               # convergence time constant, years (fixed; see text)
-E0_CAP = (60.0, 92.0)         # sanity bounds on projected e0
+E0_CAP = (60.0, 92.0)         # bounds on projected life expectancy at birth
+S_GRID = np.geomspace(0.02, 4.0, 600)   # proportional-hazard factors for the e0 map
 
 
 # ==========================================================================
-# Cohort-Component paradigm — Leslie projection step
+# Life tables (single years, open interval at the last age)
 # ==========================================================================
 
-def cohort_component_step(pop_age, survival, asfr,
-                          female_birth_share=FEMALE_BIRTH_SHARE):
-    """One-year Leslie-matrix projection step (Leslie 1945).
+def a0_coale_demeny(m0, sex='B'):
+    """Person-years lived by infants who die in their first year (a0),
+    Coale-Demeny West formulas as given by Preston et al. (2001, Table 3.3);
+    both sexes as the mean of the two."""
+    f = 0.35 if m0 >= 0.107 else 0.053 + 2.800 * m0
+    m = 0.33 if m0 >= 0.107 else 0.045 + 2.684 * m0
+    return {'F': f, 'M': m}.get(sex, 0.5 * (f + m))
 
-    Uses age-specific fertility and survival rates to project the age
-    structure of the population forward one year (Caswell 2001, 2019).
-    Net migration is zero at the planetary scale and is not an argument.
-    """
-    A = len(pop_age)
-    nxt = np.zeros(A)
-    rep = np.arange(15, min(50, A))
-    births = np.sum(pop_age[rep] * female_birth_share * asfr[rep])
-    nxt[0] = births * survival[0]
-    nxt[1:] = pop_age[:-1] * survival[:-1]
-    nxt[A - 1] += pop_age[A - 1] * survival[A - 1]   # open-ended top group
-    return nxt
+
+def life_table(mx, sex='B'):
+    """Single-year period life table from central death rates m_x, ages
+    0..A-1, the last age open-ended. Returns l_x, L_x and T_x (radix 1), so
+    that e0 = T_0."""
+    mx = np.asarray(mx, dtype=float)
+    a = np.full(mx.size, 0.5)
+    a[0] = a0_coale_demeny(mx[0], sex)
+    q = mx / (1 + (1 - a) * mx)
+    q[-1] = 1.0
+    l = np.concatenate([[1.0], np.cumprod(1 - q[:-1])])
+    d = l * q
+    L = l - (1 - a) * d
+    L[-1] = l[-1] / mx[-1]
+    T = np.cumsum(L[::-1])[::-1]
+    return l, L, T
+
+
+def life_expectancy_from_mx(mx, sex='B'):
+    return float(life_table(mx, sex)[2][0])
+
+
+def build_e0_scale_map(mx_both, s_grid=S_GRID):
+    """Map a life-expectancy target to the proportional-hazard factor s that
+    gives the both-sex schedule s * mx_both that life expectancy.
+
+    The grid must cover E0_CAP: targets are clipped to E0_CAP and looked up
+    with bounds_error=True, so no extrapolation or fill value is ever used.
+    (Before Nov 2026 the map was built on an approximate e0 and its fill
+    values were inverted: targets above about 91.3 years were given the
+    largest hazard factor, and life expectancy collapsed to about 51 years.)"""
+    e0s = np.array([life_expectancy_from_mx(s * mx_both) for s in s_grid])
+    assert np.all(np.diff(e0s) < 0), "e0 must fall as hazards rise"
+    assert e0s[-1] < E0_CAP[0] and e0s[0] > E0_CAP[1], \
+        f"hazard grid covers e0 {e0s[-1]:.1f}-{e0s[0]:.1f}, not E0_CAP {E0_CAP}"
+    return interp1d(e0s[::-1], s_grid[::-1], bounds_error=True)
+
+
+def hazard_factor_for_e0(e0_target, e0_to_s):
+    return float(e0_to_s(np.clip(e0_target, *E0_CAP)))
+
+
+def survivorship(mx_female, mx_male, s):
+    """Life tables of both sexes with hazards scaled by s: (L, T) per sex."""
+    _, LF, TF = life_table(s * mx_female, 'F')
+    _, LM, TM = life_table(s * mx_male, 'M')
+    return LF, TF, LM, TM
 
 
 # ==========================================================================
-# Mortality machinery: baseline schedule, e0 <-> hazard-scale mapping
+# Cohort-component projection, one year, two sexes
 # ==========================================================================
 
-def life_expectancy(survival):
-    """e0 from a single-year survival schedule: e0 ≈ Σ l_x (person-years)."""
-    l_x = np.cumprod(np.insert(survival[:-1], 0, 1.0))
-    return float(l_x.sum())
+def project_two_sex(F, M, asfr, LF, TF, LM, TM, female_birth_share=FEMALE_BIRTH_SHARE):
+    """Project women F and men M (single years 0..A-2, A-1 open) one year.
 
-
-def build_e0_scale_map(base_survival, s_grid=None):
-    """Map life-expectancy targets to a proportional-hazard scale factor.
-
-    Survival under scale s: S_x(s) = exp(-s·mu_x), mu_x = -ln S_x(base).
-    Returns interp1d e0 -> s over a monotone grid, replacing per-year
-    root-finding with table lookup.
-    """
-    mu = -np.log(np.clip(base_survival, 1e-9, 1 - 1e-12))
-    if s_grid is None:
-        s_grid = np.linspace(0.25, 3.0, 120)
-    e0s = np.array([life_expectancy(np.exp(-s * mu)) for s in s_grid])
-    order = np.argsort(e0s)
-    return interp1d(e0s[order], s_grid[order], bounds_error=False,
-                    fill_value=(s_grid[order][-1], s_grid[order][0])), mu
-
-
-def survival_for_e0(e0_target, e0_to_s, mu):
-    s = float(e0_to_s(np.clip(e0_target, *E0_CAP)))
-    return np.exp(-s * mu)
+    Survivors: P_{x+1}(t+1) = P_x(t) L_{x+1}/L_x, and the open interval
+    receives (P_{A-2} + P_{A-1}) T_{A-1}/T_{A-2}. Births over the year are
+    sum_x f_x (W_x(t) + W_x(t+1)) / 2, with W the women; the female share of
+    births is female_birth_share and newborns enter at age 0 as births
+    times L_0 (radix 1). Net migration is zero at the planetary scale."""
+    A = F.size
+    Fn = np.empty(A)
+    Mn = np.empty(A)
+    Fn[1:A - 1] = F[0:A - 2] * LF[1:A - 1] / LF[0:A - 2]
+    Mn[1:A - 1] = M[0:A - 2] * LM[1:A - 1] / LM[0:A - 2]
+    Fn[A - 1] = (F[A - 2] + F[A - 1]) * TF[A - 1] / TF[A - 2]
+    Mn[A - 1] = (M[A - 2] + M[A - 1]) * TM[A - 1] / TM[A - 2]
+    births = 0.5 * np.dot(asfr[1:], F[1:] + Fn[1:])   # no fertility at age 0
+    Fn[0] = female_birth_share * births * LF[0]
+    Mn[0] = (1 - female_birth_share) * births * LM[0]
+    return Fn, Mn
 
 
 def fit_e0_random_walk(e0_series):
@@ -317,22 +360,25 @@ def lotka_intrinsic_r(l_x, maternity_female, r0=0.005, max_iter=1000,
 # ==========================================================================
 
 if __name__ == '__main__':
-    A = 101; ages = np.arange(A)
-    q = np.full(A, 0.0012); q[0] = 0.027; q[1:5] = 0.0023
-    q[40:60] = 0.004; q[60:] = np.minimum(0.011*np.exp(0.075*(ages[60:]-60)), .6)
-    S = 1 - q
-    print("e0(base) =", round(life_expectancy(S), 2))
-    e0_to_s, mu = build_e0_scale_map(S)
-    for tgt in (70, 77, 85):
-        print(f"  e0 target {tgt} -> achieved "
-              f"{life_expectancy(survival_for_e0(tgt, e0_to_s, mu)):.2f}")
+    import os
+    import pandas as pd
+    w = pd.read_csv(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 'Data', 'wpp2024_world_2023_single_age.csv'))
+    print("e0 from WPP 2024 single-age mx, world 2023: both sexes",
+          round(life_expectancy_from_mx(w.mxB.values), 2), "| women",
+          round(life_expectancy_from_mx(w.mxF.values, 'F'), 2), "| men",
+          round(life_expectancy_from_mx(w.mxM.values, 'M'), 2), "(WPP 2024: 73.17, 75.89, 70.55)")
+    e0_to_s = build_e0_scale_map(w.mxB.values)
+    for tgt in (60, 73.17, 85, 91.7, 92, 95):
+        sfac = hazard_factor_for_e0(tgt, e0_to_s)
+        print(f"  e0 target {tgt:6.2f} -> factor {sfac:.3f} -> achieved "
+              f"{life_expectancy_from_mx(sfac * w.mxB.values):.2f} (cap {E0_CAP})")
     p = tfr_path(2, 52, 2.25, 1.0, floor=1.6)
     print("convergence TFR: t=1", round(p[0], 3), " t=52", round(p[-1], 3))
-    l_x = np.cumprod(np.insert(S[:-1], 0, 1.0))
-    asfr = np.zeros(A); sh = np.exp(-0.5*((np.arange(15,50)-27)/7)**2)
-    asfr[15:50] = sh/sh.sum()*2.25
+    l_x = life_table(w.mxF.values, 'F')[0]
+    asfr = 2.25 * w.pasfr.values / 100
     try:
         lotka_intrinsic_r(l_x, asfr)
     except ValueError as e:
         print("guard OK:", str(e)[:58], "...")
-    print("corrected r =", f"{lotka_intrinsic_r(l_x, asfr*FEMALE_BIRTH_SHARE):+.5f}")
+    print("corrected r =", f"{lotka_intrinsic_r(l_x, asfr * FEMALE_BIRTH_SHARE):+.5f}")

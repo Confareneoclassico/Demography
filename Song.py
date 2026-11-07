@@ -2,29 +2,44 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
-from scipy.interpolate import interp1d
-import random
 from scipy.stats import qmc
 import seaborn as sns
 
-# Constants and initial conditions
-T0 = 1978  # Initial year
-TF = 2080  # Final year
-TARGET_POPULATION = 700e6  # 700 million
+# Reference implementation of the optimal-control model of Song, Tuan and Yu
+# (1985), Population Control in China: Theory and Applications (Praeger),
+# chapter 8 "Target population and optimum control", with the data tables of
+# chapters 2, 3 and 6. Equation, table and page numbers refer to that book.
+# The program reproduced is Program 1 of Section 8.5 (pp. 262-264): controls in
+# [1, 2.16], peak population at most 1.2 billion, dependency index at most 1,
+# aging index at most 0.7, target a stationary population of 700 million.
 
-AGE_GROUPS = np.arange(0, 91) # 0 to 90+
+# Constants and initial conditions
+T0 = 1978  # Initial year (Section 8.5)
+TF = 2080  # Final year (Table 8.14 reports beta(t) and N(t) up to 2080)
+TARGET_POPULATION = 700e6  # N*, Section 8.2
+
+AGE_GROUPS = np.arange(0, 91) # single years 0..89 and an open 90+ group
 NUM_AGE_GROUPS = len(AGE_GROUPS)
 TIME_STEPS = np.arange(T0, TF + 1) # From 1978 to 2080
 NUM_TIME_STEPS = len(TIME_STEPS)
 
-# Pre-process death rates for faster lookup
-def preprocess_rates(rates_dict):
-    ages = np.array(list(rates_dict.keys()))
-    values = np.array(list(rates_dict.values()))
-    # Create an interpolation function for ages not directly in the dictionary
-    return interp1d(ages, values, kind='nearest', bounds_error=False, fill_value=(values[0], values[-1]))
+# Age-indexed inputs are built from the tables below as step functions: the value
+# given for age x applies from x up to the next tabulated age (the last one is
+# open-ended). This is the convention of abridged life tables and of open-ended
+# fertility groups.
+def step_rates(rates_dict):
+    keys = np.array(sorted(rates_dict))
+    vals = np.array([rates_dict[k] for k in keys], dtype=float)
+    def f(ages):
+        idx = np.searchsorted(keys, np.asarray(ages), side='right') - 1
+        return vals[np.clip(idx, 0, len(keys) - 1)]
+    return f
 
-# Extracted data
+# ---------------------------------------------------------------------------
+# Data, transcribed from the book
+# ---------------------------------------------------------------------------
+# Table 3.3 (p. 76): age-specific death rates in China, 1973-1975, "forward
+# mortality" mu_i, for ages 0, 1-4, 5-9, ..., 85-89 and 90+.
 age_specific_death_rates_males = {
     0: 0.04748,
     1: 0.00898,
@@ -71,100 +86,110 @@ age_specific_death_rates_females = {
     90: 0.23256
 }
 
+# Table 2.5 (p. 39): births per 1,000 women by age. Rudong (1973) has no entry
+# at age 15 and an open-ended 40+ entry; the column total, 1731.6, counts the
+# 40+ rate once for each age 40-49 (1691.6 + 10 x 4.0). Tianjin (1978) reports
+# ages 23-37 (total 1199.0). Before Nov 2026 both columns were read one row
+# too young (Rudong 15-38, Tianjin 22-36) and a Rudong entry at 39 was invented.
 fertility_rates_rudong_1973 = {
-    15: 0.8,
-    16: 5.8,
-    17: 11.0,
-    18: 28.8,
-    19: 73.2,
-    20: 111.2,
-    21: 188.9,
-    22: 209.6,
-    23: 208.7,
-    24: 196.9,
-    25: 139.5,
-    26: 115.3,
-    27: 88.7,
-    28: 84.6,
-    29: 49.1,
-    30: 30.4,
-    31: 30.6,
-    32: 21.7,
-    33: 20.9,
-    34: 13.1,
-    35: 25.1,
-    36: 15.2,
-    37: 10.5,
-    38: 12.0,
-    39: 4.0,
-    40: 4.0 # Assuming 40+ means 40 and above, using 4.0 for 40
+    16: 0.8,
+    17: 5.8,
+    18: 11.0,
+    19: 28.8,
+    20: 73.2,
+    21: 111.2,
+    22: 188.9,
+    23: 209.6,
+    24: 208.7,
+    25: 196.9,
+    26: 139.5,
+    27: 115.3,
+    28: 88.7,
+    29: 84.6,
+    30: 49.1,
+    31: 30.4,
+    32: 30.6,
+    33: 21.7,
+    34: 20.9,
+    35: 13.1,
+    36: 25.1,
+    37: 15.2,
+    38: 10.5,
+    39: 12.0,
+    40: 4.0  # 40+, applies to each age 40-49
 }
 
 fertility_rates_tianjin_1978 = {
-    22: 0.6,
-    23: 7.5,
-    24: 39.1,
-    25: 116.0,
-    26: 143.2,
-    27: 175.9,
-    28: 212.3,
-    29: 205.8,
-    30: 101.4,
-    31: 85.2,
-    32: 57.3,
-    33: 27.0,
-    34: 17.6,
-    35: 8.1,
-    36: 2.0
+    23: 0.6,
+    24: 7.5,
+    25: 39.1,
+    26: 116.0,
+    27: 143.2,
+    28: 175.9,
+    29: 212.3,
+    30: 205.8,
+    31: 101.4,
+    32: 85.2,
+    33: 57.3,
+    34: 27.0,
+    35: 17.6,
+    36: 8.1,
+    37: 2.0
 }
 
+# Table 2.5, columns (3) and (4): the same schedules as proportions h_i of the
+# total, per 1,000 (no 40+ share is printed for Rudong; 4.0/1731.6 gives 2.3
+# per age). Kept for reference: the model builds h_i from the rates above,
+# which reproduces these columns to their rounding.
 proportion_in_total_fertility_rudong = {
-    15: 0.5,
-    16: 3.4,
-    17: 6.4,
-    18: 16.6,
-    19: 42.3,
-    20: 64.3,
-    21: 109.2,
-    22: 121.2,
-    23: 120.6,
-    24: 113.8,
-    25: 80.6,
-    26: 66.6,
-    27: 51.3,
-    28: 48.9,
-    29: 28.4,
-    30: 17.6,
-    31: 17.7,
-    32: 12.5,
-    33: 12.1,
-    34: 7.6,
-    35: 14.5,
-    36: 8.8,
-    37: 6.1,
-    38: 6.9,
-    39: 4.0,
-    40: 4.0 # Assuming 40+ means 40 and above, using 4.0 for 40
+    16: 0.5,
+    17: 3.4,
+    18: 6.4,
+    19: 16.6,
+    20: 42.3,
+    21: 64.3,
+    22: 109.2,
+    23: 121.2,
+    24: 120.6,
+    25: 113.8,
+    26: 80.6,
+    27: 66.6,
+    28: 51.3,
+    29: 48.9,
+    30: 28.4,
+    31: 17.6,
+    32: 17.7,
+    33: 12.5,
+    34: 12.1,
+    35: 7.6,
+    36: 14.5,
+    37: 8.8,
+    38: 6.1,
+    39: 6.9
 }
 
 proportion_in_total_fertility_tianjin = {
-    22: 0.5,
-    23: 6.3,
-    24: 32.6,
-    25: 96.7,
-    26: 119.3,
-    27: 146.6,
-    28: 176.9,
-    29: 171.4,
-    30: 84.5,
-    31: 71.0,
-    32: 47.7,
-    33: 22.5,
-    34: 14.7,
-    35: 6.7,
-    36: 1.7
+    23: 0.5,
+    24: 6.3,
+    25: 32.6,
+    26: 96.7,
+    27: 119.3,
+    28: 146.6,
+    29: 176.9,
+    30: 171.4,
+    31: 84.5,
+    32: 71.0,
+    33: 47.7,
+    34: 22.5,
+    35: 14.7,
+    36: 6.7,
+    37: 1.7
 }
 
+# Table 6.1 (chapter 6): percentage of females by age, China 1978, k(r). The last
+# entry (50) is used for all older ages. (Before Nov 2026 the transcription had
+# skipped the second 48.92 at age 6 and the 46.64 at age 38, shifting ages
+# 6-14 and 38-49 by one year.)
 proportion_females_by_age = {
     0: 48.43,
     1: 48.92,
@@ -172,15 +197,15 @@ proportion_females_by_age = {
     3: 48.81,
     4: 48.89,
     5: 48.92,
-    6: 49.49,
-    7: 48.83,
-    8: 48.75,
-    9: 48.71,
-    10: 48.69,
-    11: 48.72,
-    12: 48.79,
-    13: 48.70,
-    14: 49.44,
+    6: 48.92,
+    7: 49.49,
+    8: 48.83,
+    9: 48.75,
+    10: 48.71,
+    11: 48.69,
+    12: 48.72,
+    13: 48.79,
+    14: 48.70,
     15: 49.42,
     16: 49.44,
     17: 48.71,
@@ -204,21 +229,22 @@ proportion_females_by_age = {
     35: 47.37,
     36: 47.11,
     37: 46.93,
-    38: 47.24,
-    39: 46.41,
-    40: 46.24,
-    41: 46.59,
-    42: 46.78,
-    43: 46.93,
-    44: 46.34,
-    45: 46.77,
-    46: 46.57,
-    47: 46.80,
-    48: 46.85,
-    49: 47.23,
-    50: 47.23 # Assuming 50+ is represented by 50
+    38: 46.64,
+    39: 47.24,
+    40: 46.41,
+    41: 46.24,
+    42: 46.59,
+    43: 46.78,
+    44: 46.93,
+    45: 46.34,
+    46: 46.77,
+    47: 46.57,
+    48: 46.80,
+    49: 46.85,
+    50: 47.23
 }
 
+# Table 2.10 (chapter 2): sex ratio of the Chinese, 1975-1978
 sex_ratio = {
     1975: {"women": 0.4876, "men": 0.5124},
     1976: {"women": 0.4873, "men": 0.5127},
@@ -226,16 +252,13 @@ sex_ratio = {
     1978: {"women": 0.4872, "men": 0.5128}
 }
 
+# Table 2.12 (p. 48): proportion of female infants in zero ages
 proportion_female_infants_zero_age = {
     1953: 0.4881,
     1964: 0.4906,
     1975: 0.4835,
     1978: 0.4843
 }
-
-# Pre-process rates into interpolation functions
-interp_death_rates_males = preprocess_rates(age_specific_death_rates_males)
-interp_death_rates_females = preprocess_rates(age_specific_death_rates_females)
 
 # Function to parse population data from CSV
 def parse_population_data_optimized(file_path):
@@ -269,169 +292,272 @@ def parse_population_data_optimized(file_path):
     return initial_population_distribution
 
 def get_female_infant_proportion(year):
-    return proportion_female_infants_zero_age.get(year, proportion_female_infants_zero_age[1978]) / 100.0
+    return proportion_female_infants_zero_age.get(year, proportion_female_infants_zero_age[1978])
 
-def population_dynamics_step_optimized(X_t, beta_t, current_year, mortality_evolution_factor, newborn_female_proportion, fertility_age_shift_factor, interp_fertility_proportion, interp_female_proportion_by_age):
-    X_t_plus_1 = np.zeros_like(X_t)
+# Age-indexed inputs on the model's single-year grid (0..89, 90+)
+REPRODUCTIVE_AGES = np.arange(15, 50)   # a1..a2 (zero rates outside the tables)
+death_rates_males = step_rates(age_specific_death_rates_males)(AGE_GROUPS)
+death_rates_females = step_rates(age_specific_death_rates_females)(AGE_GROUPS)
+# Female share k_i of the 1978 population by age (Table 6.1, 50 = 50+)
+female_share_1978 = step_rates(proportion_females_by_age)(AGE_GROUPS) / 100.0
+FEMALE_INFANT_SHARE_1978 = proportion_female_infants_zero_age[1978]
 
-    # Births (age 0 population)
-    reproductive_ages = np.arange(15, 50) # Ages 15-49
-    valid_reproductive_ages = reproductive_ages[reproductive_ages < NUM_AGE_GROUPS]
+# Infant loss in the year of birth, mu_00 in c_i = (1 - mu_00) k_i h_i (p. 26,
+# eq. 8.4-6). The book gives no value; the first-year loss is carried by the
+# age-0 rate of Table 3.3, so mu_00 is set to zero.
+MU00 = 0.0
 
-    # Apply fertility age shift factor
-    shifted_fertility_proportions = interp_fertility_proportion(valid_reproductive_ages) / 1000.0
+
+def stationary_weights(mu_f, mu_m, female_share_at_birth):
+    """Persons in each age group of the stationary population per infant counted
+    at age 0, under the model's own dynamics x_{i+1} = (1 - mu_i) x_i with the
+    open 90+ group, both sexes. This is the discrete form of eqs. (8.2-1)-(8.2-3):
+    with forward mortality mu_i = 1 - L_{i+1}/L_i the products are L_i/L_0.
+    The sum is the life expectancy at birth S_0."""
+    def one(mu):
+        l = np.ones(NUM_AGE_GROUPS)
+        l[1:] = np.cumprod(1 - mu[:-1])
+        l[-1] = l[-1] / mu[-1]          # 90+: l_90 (1 + (1-mu) + (1-mu)^2 + ...)
+        return l
+    return female_share_at_birth * one(mu_f) + (1 - female_share_at_birth) * one(mu_m)
+
+
+def mortality_factor(mortality_evolution_factor):
+    """Multiplier of the 1973-75 death rates in each year 1978..2080 (linear
+    decline by the given fraction over the horizon)."""
+    return 1 - mortality_evolution_factor * (TIME_STEPS - T0) / (TF - T0)
+
+
+def period_life_expectancy(mortality_evolution_factor, newborn_female_proportion):
+    """Life expectancy at birth S_0(t) in each year, from the death rates of
+    that year and the newborn female proportion."""
+    return np.array([stationary_weights(death_rates_females * f, death_rates_males * f,
+                                        newborn_female_proportion).sum()
+                     for f in mortality_factor(mortality_evolution_factor)])
+
+
+# Target state X* (eqs. 8.2-1 to 8.2-3 and 8.4-2): the stationary population of
+# 700 million implied by the model's mortality (Table 3.3), in which births
+# equal deaths. (Before Nov 2026 X* was a hand-drawn step profile summing to
+# 710.5 million.)
+_W_STAR = stationary_weights(death_rates_females, death_rates_males, FEMALE_INFANT_SHARE_1978)
+X_STAR = TARGET_POPULATION * _W_STAR / _W_STAR.sum()
+
+# Program 1 (Section 8.5, p. 262; Figure 8.8): U = [beta_0, beta_1] = [1, 2.16]
+# (8.2-8), peak population N_0 = 1.2 billion (8.2-9), dependency index
+# rho_0 = 1 (8.2-10), aging index omega_0 = 0.7 (8.2-11). "For our purpose, the
+# three important indices listed above suffice" (p. 252). Stationarity is the
+# target X*, not a constraint.
+POPULATION_MAX = 1.2e9
+SOCIAL_DEPENDENCY_MAX = 1.0
+AGING_INDEX_MAX = 0.7
+BETA_BOUNDS = (1.0, 2.16)
+
+# The book's gradient program (8.4-12) handles the control set U by projection;
+# the state constraints are imposed here as exterior penalties on violations
+# measured in persons, which makes them effectively hard. A cold start of the
+# penalised problem can stall, so it is solved by continuation: penalty factors
+# 1e4, 1e6, ... up to the sampled factor, each stage warm-started from the
+# previous solution.
+PENALTY_START = 1e4
+
+
+def penalty_schedule(penalty_factor):
+    out, pf = [], PENALTY_START
+    while pf < penalty_factor:
+        out.append(pf)
+        pf *= 100
+    out.append(penalty_factor)
+    return out
+
+
+def fertility_pattern(fertility_rate_source, fertility_age_shift_factor=0.0):
+    """Age pattern of fertility h_i over ages 15-49, summing to one, so that the
+    control beta(t) is exactly the total fertility rate (Table 2.5 columns 3-4).
+
+    Built from Song's age-specific fertility rates: Rudong 1973 (the 40+ rate
+    applies to each age 40-49) or Tianjin 1978. The age shift moves a share s of
+    the schedule five years OLDER, h_s(x) = (1-s) h(x) + s h(x-5), renormalised
+    so that the shift changes the timing of childbearing and not its level."""
+    table = fertility_rates_rudong_1973 if fertility_rate_source == 0 else fertility_rates_tianjin_1978
+    asfr = np.zeros(NUM_AGE_GROUPS)
+    for age, rate in table.items():
+        asfr[age] = rate
+    if fertility_rate_source == 0:
+        asfr[40:50] = table[40]
+    h = asfr[REPRODUCTIVE_AGES] / asfr[REPRODUCTIVE_AGES].sum()
     if fertility_age_shift_factor != 0:
-        # Simple shift: move fertility to older ages by adjusting the index
-        # fertility is shifted by 5 years (e.g., ages 20-54 instead of 15-49)
-        shifted_fertility_proportions_older = interp_fertility_proportion(valid_reproductive_ages + 5) / 1000.0
-        shifted_fertility_proportions = (1 - fertility_age_shift_factor) * shifted_fertility_proportions + \
-                                        fertility_age_shift_factor * shifted_fertility_proportions_older
+        older = np.zeros_like(h)
+        older[5:] = h[:-5]
+        h = (1 - fertility_age_shift_factor) * h + fertility_age_shift_factor * older
+        h = h / h.sum()
+    return h
 
-    female_population_in_age_groups = X_t[valid_reproductive_ages] * (interp_female_proportion_by_age(valid_reproductive_ages) / 100.0)
-    total_births = np.sum(female_population_in_age_groups * beta_t * shifted_fertility_proportions)
-    X_t_plus_1[0] = total_births
 
-    # Aging and Deaths for other age groups
-    death_rates_male = interp_death_rates_males(AGE_GROUPS) * (1 - mortality_evolution_factor * (current_year - T0) / (TF - T0))
-    death_rates_female = interp_death_rates_females(AGE_GROUPS) * (1 - mortality_evolution_factor * (current_year - T0) / (TF - T0))
-    
-    # Use newborn_female_proportion to weight male/female death rates
-    avg_death_rates = (death_rates_male * (1 - newborn_female_proportion) + death_rates_female * newborn_female_proportion)
-    
-    X_t_plus_1[1:] = X_t[:-1] * (1 - avg_death_rates[:-1])
-    # For the oldest age group (90+), they stay in the same group with deaths
-    X_t_plus_1[NUM_AGE_GROUPS - 1] += X_t[NUM_AGE_GROUPS - 1] * (1 - avg_death_rates[NUM_AGE_GROUPS - 1])
+def initial_population(initial_pyramid_type, file_path="./Data/china_population_1978.csv"):
+    X0 = parse_population_data_optimized(file_path)
+    if initial_pyramid_type == 1:          # younger pyramid
+        X0[0:20] *= 1.2
+        X0[40:] *= 0.8
+        X0 = X0 * (958e6 / np.sum(X0))
+    elif initial_pyramid_type == 2:        # older pyramid
+        X0[0:20] *= 0.8
+        X0[40:] *= 1.2
+        X0 = X0 * (958e6 / np.sum(X0))
+    return X0
 
-    return X_t_plus_1
 
-# Equation 8.4-1: Population Dynamics Model (simulation over time)
-def simulate_population_optimized(initial_X, beta_trajectory, mortality_evolution_factor, newborn_female_proportion, fertility_age_shift_factor, interp_fertility_proportion, interp_female_proportion_by_age):
+# Equations (2.2-13), (8.3-1) and (8.4-1): X(t+1) = [H(t) + beta(t) B(t)] X(t),
+# X(t0) = X0, with X the population aged 1..m. The infants of year t are
+# x_0(t) = beta(t) C(t)'X(t), c_i = (1 - mu_00) k_i h_i (8.4-6), and reach age 1
+# at t+1 with survival 1 - mu_0 (the first row of B(t), p. 26). Women and men
+# are projected with their own death rates (Table 3.3), so the female shares
+# k_i(t) of cohorts born after 1978 follow from the newborn female proportion;
+# the 1978 shares are those of Table 6.1. The 1978 infants are generated by
+# beta(1978), as in the book, whose first control is beta(1978).
+def simulate_population_optimized(initial_X, beta_trajectory, mortality_evolution_factor,
+                                  newborn_female_proportion, fertility_h, female_share=female_share_1978):
+    F = initial_X * female_share
+    M = initial_X - F
+    F[0] = 0.0
+    M[0] = 0.0
+    p = newborn_female_proportion
+    tfac = mortality_factor(mortality_evolution_factor)
     population_history = np.zeros((NUM_TIME_STEPS, NUM_AGE_GROUPS))
-    population_history[0] = initial_X
-    current_X = initial_X
-
-    for i in range(NUM_TIME_STEPS - 1):
-        year = TIME_STEPS[i]
-        beta_t = beta_trajectory[i]
-        current_X = population_dynamics_step_optimized(current_X, beta_t, year, mortality_evolution_factor, newborn_female_proportion, fertility_age_shift_factor, interp_fertility_proportion, interp_female_proportion_by_age)
-        population_history[i + 1] = current_X
-        
+    A = NUM_AGE_GROUPS
+    for i in range(NUM_TIME_STEPS):
+        births = (1 - MU00) * beta_trajectory[i] * np.dot(F[REPRODUCTIVE_AGES], fertility_h)
+        F[0] = p * births
+        M[0] = (1 - p) * births
+        population_history[i] = F + M
+        if i == NUM_TIME_STEPS - 1:
+            break
+        sf = 1 - death_rates_females * tfac[i]
+        sm = 1 - death_rates_males * tfac[i]
+        F_next = np.zeros(A)
+        M_next = np.zeros(A)
+        F_next[1:] = F[:-1] * sf[:-1]
+        M_next[1:] = M[:-1] * sm[:-1]
+        F_next[A - 1] += F[A - 1] * sf[A - 1]          # open-ended 90+ group
+        M_next[A - 1] += M[A - 1] * sm[A - 1]
+        F, M = F_next, M_next
     return population_history
 
-# Performance Index J(T)
+
+# Performance index (8.4-2): J = sum_t [X(t) - X*]'[X(t) - X*] + (x_0(t) - x_0*)^2,
+# X over ages 1..m, so that every age 0..90 is counted once. The controls run
+# over 1978-2080 and the sum over the same years (T = 2081 in the book's
+# notation, whose Table 8.14 reports beta(2080)).
 def performance_index_optimized(X_history, X_star_history):
-    J = np.sum((X_history - X_star_history)**2) + np.sum((X_history[:, 0] - X_star_history[0])**2)
-    return J
+    return float(np.sum((X_history - X_star_history) ** 2))
 
-# Constraints
-def calculate_social_dependency_ratio_optimized(population_distribution):
-    dependent_young = np.sum(population_distribution[0:15])
-    dependent_old = np.sum(population_distribution[65:])
-    productive_age = np.sum(population_distribution[15:65])
-    
-    if productive_age == 0:
-        return float("inf")
-    return (dependent_young + dependent_old) / productive_age
 
-def calculate_aging_index_optimized(population_distribution):
-    total_pop = np.sum(population_distribution)
-    elderly_pop = np.sum(population_distribution[65:])
-    if total_pop == 0:
-        return 0.0
-    return elderly_pop / total_pop
+def dependency_ratio(population_distribution):
+    """Social dependency index rho(t): dependants (ages <15 and 65+) per person
+    aged 15-64 ("the number of elderly and children who depend on each worker",
+    Cohen 1990). Works on one year or on a history."""
+    P = np.atleast_2d(population_distribution)
+    dependants = P[:, 0:15].sum(axis=1) + P[:, 65:].sum(axis=1)
+    working = P[:, 15:65].sum(axis=1)
+    out = dependants / working
+    return out if np.ndim(population_distribution) > 1 else float(out[0])
+
+
+def aging_index(population_history, life_expectancy):
+    """Aging index omega(t): mean age of the whole population over life
+    expectancy at birth (Song and Yu 1988; Cohen 1990). Ages at mid-interval."""
+    P = np.atleast_2d(population_history)
+    mean_age = (P @ (AGE_GROUPS + 0.5)) / P.sum(axis=1)
+    return mean_age / np.asarray(life_expectancy)
+
+
+def constraint_violations(population_history, life_expectancy):
+    """Violations of the three state constraints of Program 1, in persons, so
+    that one penalty factor weighs them alike: dependants above rho_0 times the
+    working-age population (8.2-10), total population times the excess of the
+    aging index over omega_0 (8.2-11), and population above 1.2 billion (8.2-9).
+    (Before Nov 2026 the code penalised squared ratios, which could never bind,
+    and imposed 65+/total <= 0.7 in place of the aging index; the version of
+    early Nov 2026 imposed the paper's description instead: dependency ratio
+    <= 0.7 and a stabilisation band in 2080.)"""
+    P = population_history
+    dependants = P[:, 0:15].sum(axis=1) + P[:, 65:].sum(axis=1)
+    working = P[:, 15:65].sum(axis=1)
+    total = P.sum(axis=1)
+    years_lived = P @ (AGE_GROUPS + 0.5)
+    social = np.clip(dependants - SOCIAL_DEPENDENCY_MAX * working, 0, None)
+    aging = np.clip(years_lived / life_expectancy - AGING_INDEX_MAX * total, 0, None)
+    ceiling = np.clip(total - POPULATION_MAX, 0, None)
+    return social, aging, ceiling
+
 
 # Objective function for scipy.optimize.minimize
-def objective_function_optimized(beta_array, initial_X, X_star_history, penalty_factor, mortality_evolution_factor, newborn_female_proportion, fertility_age_shift_factor, interp_fertility_proportion, interp_female_proportion_by_age):
-    population_history = simulate_population_optimized(initial_X, beta_array, mortality_evolution_factor, newborn_female_proportion, fertility_age_shift_factor, interp_fertility_proportion, interp_female_proportion_by_age)
+def objective_function_optimized(beta_array, initial_X, X_star_history, penalty_factor, mortality_evolution_factor,
+                                 newborn_female_proportion, fertility_h, female_share=female_share_1978):
+    beta_array = np.clip(beta_array, *BETA_BOUNDS)
+    population_history = simulate_population_optimized(initial_X, beta_array, mortality_evolution_factor,
+                                                        newborn_female_proportion, fertility_h, female_share)
     J = performance_index_optimized(population_history, X_star_history)
+    e0 = period_life_expectancy(mortality_evolution_factor, newborn_female_proportion)
+    social, aging, ceiling = constraint_violations(population_history, e0)
+    penalty = np.sum(social ** 2) + np.sum(aging ** 2) + np.sum(ceiling ** 2)
+    return J + penalty_factor * penalty
 
-    # Add penalty for constraint violations
-    penalty = 0.0
 
-    # Peak population constraint
-    total_populations = np.sum(population_history, axis=1)
-    violations = total_populations[total_populations > 1.2e9]
-    if violations.size > 0:
-        penalty += penalty_factor * np.sum((violations - 1.2e9)**2)
+def objective_and_gradient(beta_array, *args):
+    """Objective with a forward-difference gradient (steps as in scipy's
+    2-point scheme, backward at the upper bound). Supplying the gradient keeps
+    scipy >= 1.18 from aborting when L-BFGS-B returns an iterate a rounding
+    error outside its bounds."""
+    beta = np.clip(np.asarray(beta_array, dtype=float), *BETA_BOUNDS)
+    f0 = objective_function_optimized(beta, *args)
+    g = np.empty_like(beta)
+    for j in range(beta.size):
+        h = 1.4901161193847656e-08 * max(1.0, abs(beta[j]))
+        if beta[j] + h > BETA_BOUNDS[1]:
+            h = -h
+        b = beta.copy()
+        b[j] = beta[j] + h
+        g[j] = (objective_function_optimized(b, *args) - f0) / (b[j] - beta[j])
+    return f0, g
 
-    # Social dependency ratio constraint
-    sdr_values = np.array([calculate_social_dependency_ratio_optimized(pop_dist) for pop_dist in population_history])
-    sdr_violations = sdr_values[sdr_values > 1.0]
-    if sdr_violations.size > 0:
-        penalty += penalty_factor * np.sum((sdr_violations - 1.0)**2)
-
-    # Aging index constraint
-    aging_index_values = np.array([calculate_aging_index_optimized(pop_dist) for pop_dist in population_history])
-    aging_index_violations = aging_index_values[aging_index_values > 0.7]
-    if aging_index_violations.size > 0:
-        penalty += penalty_factor * np.sum((aging_index_violations - 0.7)**2)
-            
-    return J + penalty
 
 def solve_population_trajectory_with_constraints_scipy_optimized(initial_pyramid_type, fertility_rate_source, mortality_evolution_factor, newborn_female_proportion, optimizer_tolerance, optimizer_max_iterations, penalty_factor, fertility_age_shift_factor):
-    initial_tfr = 2.16
-    beta_initial_array = np.array([initial_tfr for _ in TIME_STEPS])
-
-    initial_population_distribution = parse_population_data_optimized("./Data/china_population_1978.csv")
-    if initial_pyramid_type == 1:
-        # Example of a younger population pyramid
-        initial_population_distribution[0:20] *= 1.2 # Increase younger population
-        initial_population_distribution[40:] *= 0.8 # Decrease older population
-        initial_population_distribution = initial_population_distribution * (958e6 / np.sum(initial_population_distribution))
-    elif initial_pyramid_type == 2:
-        # Example of an older population pyramid
-        initial_population_distribution[0:20] *= 0.8 # Decrease younger population
-        initial_population_distribution[40:] *= 1.2 # Increase older population
-        initial_population_distribution = initial_population_distribution * (958e6 / np.sum(initial_population_distribution))
-    # Select fertility rate source
-    if fertility_rate_source == 0:
-        interp_fertility_proportion = preprocess_rates(proportion_in_total_fertility_rudong)
-    else:
-        interp_fertility_proportion = preprocess_rates(proportion_in_total_fertility_tianjin)
-
-    interp_female_proportion_by_age = preprocess_rates(proportion_females_by_age)
-
-    # Target population distribution
-    X_star_history = np.array([
-    10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000,  # 0–9
-    10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000,  # 10–19
-    10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000,  # 20–29
-    10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000,  # 30–39
-    10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000, 10000000,  # 40–49
-    9000000, 9000000, 9000000, 9000000, 9000000,                                                     # 50–54
-    8000000, 8000000, 8000000, 8000000, 8000000,                                                     # 55–59
-    7000000, 7000000, 7000000, 7000000, 7000000,                                                     # 60–64
-    6000000, 6000000, 6000000, 6000000, 6000000,                                                     # 65–69
-    5000000, 5000000, 5000000, 5000000, 5000000,                                                     # 70–74
-    4000000, 4000000, 4000000, 4000000, 4000000,                                                     # 75–79
-    2000000, 2000000, 2000000, 2000000, 2000000,                                                     # 80–84
-    1000000, 1000000, 1000000, 1000000, 1000000,                                                     # 85–89
-    500000                                                                               # 90+
-])
+    beta_initial_array = np.full(NUM_TIME_STEPS, 2.16)
+    initial_population_distribution = initial_population(initial_pyramid_type)
+    fertility_h = fertility_pattern(fertility_rate_source, fertility_age_shift_factor)
+    X_star_history = X_STAR
 
     # Bounds for beta (TFR)
-    bounds = [(1, 2.16) for _ in TIME_STEPS]
+    bounds = [BETA_BOUNDS for _ in TIME_STEPS]
 
-    # Optimization using L-BFGS-B
-    result = minimize(
-        objective_function_optimized,
-        beta_initial_array,
-        args=(initial_population_distribution, X_star_history, penalty_factor, mortality_evolution_factor, newborn_female_proportion, fertility_age_shift_factor, interp_fertility_proportion, interp_female_proportion_by_age),
-        method='L-BFGS-B',
-        bounds=bounds,
-        options={'disp': True, 'maxiter': optimizer_max_iterations, 'ftol': optimizer_tolerance}
-    )
+    # Optimization using L-BFGS-B, continuation in the penalty factor
+    beta = beta_initial_array
+    for pf in penalty_schedule(penalty_factor):
+        result = minimize(
+            objective_and_gradient,
+            beta,
+            jac=True,
+            args=(initial_population_distribution, X_star_history, pf, mortality_evolution_factor,
+                  newborn_female_proportion, fertility_h),
+            method='L-BFGS-B',
+            bounds=bounds,
+            options={'maxiter': optimizer_max_iterations, 'ftol': optimizer_tolerance}
+        )
+        beta = np.clip(result.x, *BETA_BOUNDS)
 
-    optimized_beta_array = result.x
-    population_history = simulate_population_optimized(initial_population_distribution, optimized_beta_array, mortality_evolution_factor, newborn_female_proportion, fertility_age_shift_factor, interp_fertility_proportion, interp_female_proportion_by_age)
-    
+    optimized_beta_array = beta
+    population_history = simulate_population_optimized(initial_population_distribution, optimized_beta_array,
+                                                        mortality_evolution_factor, newborn_female_proportion, fertility_h)
+
     # Calculate output variables
     total_population_2080 = np.sum(population_history[-1])
-    years_aging_index_exceeded = np.sum(np.array([calculate_aging_index_optimized(pop_dist) for pop_dist in population_history]) > 0.7)
-    years_dependency_ratio_exceeded = np.sum(np.array([calculate_social_dependency_ratio_optimized(pop_dist) for pop_dist in population_history]) > 1.0)
-    years_upper_threshold_exceeded = np.sum(np.sum(population_history, axis=1) > 1.2e9)
+    e0 = period_life_expectancy(mortality_evolution_factor, newborn_female_proportion)
+    years_aging_index_exceeded = int(np.sum(aging_index(population_history, e0) > AGING_INDEX_MAX + 1e-6))
+    years_social_dependency_exceeded = int(np.sum(dependency_ratio(population_history) > SOCIAL_DEPENDENCY_MAX + 1e-6))
+    years_upper_threshold_exceeded = int(np.sum(np.sum(population_history, axis=1) > POPULATION_MAX))
 
-    return optimized_beta_array, population_history, X_star_history, total_population_2080, years_aging_index_exceeded, years_dependency_ratio_exceeded, years_upper_threshold_exceeded
+    return optimized_beta_array, population_history, X_star_history, total_population_2080, years_aging_index_exceeded, years_social_dependency_exceeded, years_upper_threshold_exceeded
 
 def generate_sobol_parameters(sample_index, num_samples):
     """
@@ -459,8 +585,9 @@ def generate_sobol_parameters(sample_index, num_samples):
     # Number of dimensions for Sobol sequence
     num_dimensions = len(ranges)
 
-    # Generate Sobol sequence
-    sampler = qmc.Sobol(d=num_dimensions, scramble=False)
+    # Generate a scrambled Sobol' sequence (fixed seed). The unscrambled sequence
+    # starts at the origin, which made sample 0 the all-minimum corner.
+    sampler = qmc.Sobol(d=num_dimensions, scramble=True, seed=1978)
     sample = sampler.random_base2(m=int(np.log2(num_samples)))[sample_index]
 
     # Map Sobol sample to parameter ranges
@@ -468,11 +595,12 @@ def generate_sobol_parameters(sample_index, num_samples):
     i = 0
 
     # initial_pyramid_type
-    parameters['initial_pyramid_type'] = int(np.round(sample[i] * (ranges['initial_pyramid_type'][1] - ranges['initial_pyramid_type'][0]) + ranges['initial_pyramid_type'][0]))
+    # discrete inputs: equiprobable levels (rounding gave the middle level half the weight)
+    parameters['initial_pyramid_type'] = min(int(np.floor(sample[i] * 3)), 2)
     i += 1
 
     # fertility_rate_source
-    parameters['fertility_rate_source'] = int(np.round(sample[i] * (ranges['fertility_rate_source'][1] - ranges['fertility_rate_source'][0]) + ranges['fertility_rate_source'][0]))
+    parameters['fertility_rate_source'] = min(int(np.floor(sample[i] * 2)), 1)
     i += 1
 
     # mortality_evolution_factor
@@ -510,8 +638,8 @@ if __name__ == '__main__':
     
     OUTPUT_VARIABLES = [
         'total_population_2080',
-        'social_index_ratio',
-        'aging_index',
+        'dependency_ratio_2080',
+        'years_aging_index_above_0.7',
         'years_above_1.2B'
     ]
     
@@ -535,7 +663,7 @@ if __name__ == '__main__':
         if i % 10 == 0:
             print(f"  Simulation {i+1}/{N_SIMULATIONS}")
             
-        optimized_beta, pop_history, _, total_pop, aging_years, sdr_years, threshold_years = solve_population_trajectory_with_constraints_scipy_optimized(
+        optimized_beta, pop_history, _, total_pop, aging_years, social_dep_years, threshold_years = solve_population_trajectory_with_constraints_scipy_optimized(
             params['initial_pyramid_type'],
             params['fertility_rate_source'],
             params['mortality_evolution_factor'],
@@ -548,8 +676,8 @@ if __name__ == '__main__':
         
         # Store results
         results['outputs']['total_population_2080'].append(total_pop)
-        results['outputs']['social_index_ratio'].append(calculate_social_dependency_ratio_optimized(pop_history[-1]))
-        results['outputs']['aging_index'].append(calculate_aging_index_optimized(pop_history[-1]))
+        results['outputs']['dependency_ratio_2080'].append(dependency_ratio(pop_history[-1]))
+        results['outputs']['years_aging_index_above_0.7'].append(aging_years)
         results['outputs']['years_above_1.2B'].append(threshold_years)
         results['population_trajectories'].append(np.sum(pop_history, axis=1))
         results['fertility_trajectories'].append(optimized_beta)
@@ -576,8 +704,8 @@ if __name__ == '__main__':
     # 1. Population distribution plots
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     sns.histplot(results_df['total_population_2080'], kde=True, bins=10, ax=axes[0,0])
-    sns.histplot(results_df['social_index_ratio'], kde=True, bins=10, ax=axes[0,1])
-    sns.histplot(results_df['aging_index'], kde=True, bins=10, ax=axes[1,0])
+    sns.histplot(results_df['dependency_ratio_2080'], kde=True, bins=10, ax=axes[0,1])
+    sns.histplot(results_df['years_aging_index_above_0.7'], kde=True, bins=10, ax=axes[1,0])
     sns.histplot(results_df['years_above_1.2B'], kde=True, bins=10, ax=axes[1,1])
     plt.tight_layout()
     plt.savefig('./figures/uncertainty_distributions.png')
@@ -610,7 +738,7 @@ if __name__ == '__main__':
     # SUMMARY STATISTICS
     print("\nFinal Results Summary:")
     print(f"Mean 2080 Population: {np.mean(results_df['total_population_2080']/1e6):.2f} million")
-    print(f"Mean Aging Index: {np.mean(results_df['aging_index']):.3f}")
+    print(f"Mean dependency ratio in 2080: {np.mean(results_df['dependency_ratio_2080']):.3f}")
     print(f"Mean Fertility Distance: {np.mean(results_df['fertility_distance']):.2f}")
 
     # Save results
