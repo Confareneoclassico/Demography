@@ -108,6 +108,23 @@ What the book check shows (`results/song_book_check.json`,
   finite-horizon index; it adds 0.02 TFR-years to the median cumulative
   deficit.
 
+Effect on the results (5,120 solves; submitted values in brackets):
+
+- Control-path metrics, median (5th-95th percentile): minimum TFR 1.13
+  (1.00-1.26) [1.13 (1.00-1.26)], at the lower bound in 28% of runs [33%];
+  trough year 1988 (1980-1994) [1988 (1979-1993)]; years below 2.0: 31
+  (27-33) [31 (27-32)]; cumulative deficit 26.8 (19.9-31.4) [27.5
+  (19.8-31.5)]; return to replacement 2010 (2007-2013) [2011 (2008-2014)].
+- 2080 population 639-695 million [675-699]. No state constraint binds at
+  the optimum: aging index at most 0.68, dependency index at most 0.84,
+  peak population 0.98-1.04 billion.
+- Sensitivity: the initial pyramid leads four of the five metrics (ST 0.99
+  on trough depth, 0.86 on the deficit). The fertility source now leads the
+  years below 2.0 (ST 0.52, pyramid 0.37). The newborn female proportion,
+  which now sets the number of future mothers, reaches ST 0.28 on the
+  return year and 0.11 on the years below 2.0 [at most 0.01]. The optimiser
+  settings have ST <= 0.01 on every metric [up to 0.10].
+
 ### Case study 2: the world experiment (`MoMP_world.py`, `demographic_models.py`)
 
 - Mapping from life expectancy to the proportional-hazard factor. The
@@ -115,7 +132,7 @@ What the book check shows (`results/song_book_check.json`,
   the grid's range returned the highest hazard factor instead of the
   lowest, so that very favourable mortality paths produced a mortality
   collapse. This affected 947 of 24,576 runs (3.9%), including the 2075
-  minimum of 5.69 billion. The map is now monotone, checked, and raises an
+  minimum of 5.7 billion. The map is now monotone, checked, and raises an
   error outside its range; life expectancy is capped at [60, 92], the range
   the map covers, and the cap is disclosed.
 - Initial age structure. The submitted code distributed the 2023 world
@@ -138,7 +155,24 @@ What the book check shows (`results/song_book_check.json`,
   female share x L(0). The submitted step applied first-year survival twice
   (once to the births entering age 0 and again on the way to age 1) and
   projected one sex, taking women as a fixed 48.5% of every age group.
-- Engine check against the WPP 2024 medium variant: the engine is run with
-  WPP's medium-variant fertility and life-expectancy paths and its 2050 and
-  2075 totals compared with WPP's (`engine_check` in `momp_v2_summary.json`).
+- Engine check against the WPP 2024 medium variant: run with WPP's
+  medium-variant fertility and life-expectancy paths, the engine gives
+  9.654 billion in 2050 and 10.180 billion in 2075, against WPP's 9.664 and
+  10.250 (-0.1% and -0.7%; `engine_check` in `momp_v2_summary.json`).
 - Dead code in the optimal-transport step removed.
+
+Effect on the results (N = 2048, 24,576 runs; submitted values in brackets):
+
+- Cohort-component medians for 2075: 9.37-11.51 billion [8.16-9.84]; for
+  2050: 9.43-10.00 billion [8.43-8.95]. The six configurations now bracket
+  the UN medium variant (9.66 and 10.25 billion). ARIMA results unchanged.
+- Ensemble: 2075 mean 11.00 billion [10.27], 90% band 7.73-15.83 [7.45-15.83],
+  range 5.72-27.34 [5.70-27.34]; 2050 mean 9.70 [9.19], band 7.95-11.18.
+- Sobol' indices, 2075: paradigm S1 0.09, ST 0.53 [0.26, 0.63]; ARIMA order
+  0.17, 0.42 [0.14, 0.35]; ARIMA realisation 0.23, 0.52 [0.19, 0.42];
+  fertility model 0.04, 0.05 [0.02, 0.02]. First-order indices sum to 0.54
+  [0.62]. 2050: paradigm 0.02, 0.50; ARIMA order 0.26, 0.54; realisation
+  0.21, 0.42.
+- Optimal-transport indices, 2075: realisation 0.28, paradigm 0.17, order
+  0.14 [0.27, 0.28, 0.15]; 2050: realisation 0.21, order 0.20, paradigm
+  0.17 [0.20, 0.15, 0.32].
